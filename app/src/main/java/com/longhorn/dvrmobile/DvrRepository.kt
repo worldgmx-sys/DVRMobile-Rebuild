@@ -24,7 +24,37 @@ class DvrRepository(context: Context) {
     suspend fun probe(): Result<String> = command { DvrProtocol.getDvr(it) }
     suspend fun startRecording() = command { DvrProtocol.video(it, "normal") }
     suspend fun stopRecording() = command { DvrProtocol.video(it, "stop") }
-    suspend fun capture() = command { DvrProtocol.video(it, "capture") }
+    suspend fun captureVerified(): Result<DvrMediaFile?> = withContext(Dispatchers.IO) {
+        val ip = status.value.ip
+            ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
+
+        suspend fun photoSnapshot(): Set<String> =
+            listMedia(DvrMediaFile.Kind.PHOTO).getOrDefault(emptyList())
+                .map { it.remotePath }
+                .toSet()
+
+        suspend fun waitForNewPhoto(before: Set<String>): DvrMediaFile? {
+            repeat(4) {
+                kotlinx.coroutines.delay(700)
+                val files = listMedia(DvrMediaFile.Kind.PHOTO).getOrDefault(emptyList())
+                files.firstOrNull { it.remotePath !in before }?.let { return it }
+            }
+            return null
+        }
+
+        runCatching {
+            val before = photoSnapshot()
+
+            get(DvrProtocol.video(ip, "capture"))
+            waitForNewPhoto(before)?.let { return@runCatching it }
+
+            // Some firmwares silently ignore capture unless DVR has been explicitly enabled.
+            get(DvrProtocol.setDvr(ip, true))
+            kotlinx.coroutines.delay(400)
+            get(DvrProtocol.video(ip, "capture"))
+            waitForNewPhoto(before)
+        }
+    }
     suspend fun eventRecording() = command { DvrProtocol.video(it, "event") }
     suspend fun setMic(on: Boolean) = command { DvrProtocol.setMic(it, on) }
     suspend fun setDvr(on: Boolean) = command { DvrProtocol.setDvr(it, on) }
