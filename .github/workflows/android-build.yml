@@ -1,0 +1,52 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Extract project
+        run: |
+          unzip -q DVRMobile_Rebuild_Phase1_Source.zip
+          test -f DVRMobile_Rebuild_Phase1/settings.gradle.kts
+
+      - name: Build debug APK
+        working-directory: DVRMobile_Rebuild_Phase1
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DVRMobile-debug-apk
+          path: DVRMobile_Rebuild_Phase1/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
