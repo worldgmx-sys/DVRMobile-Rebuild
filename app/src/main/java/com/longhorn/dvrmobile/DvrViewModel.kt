@@ -38,7 +38,24 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
     fun probe() = action("正在测试连接") { repo.probe() }
     fun recordStart() = action("开始录像") { repo.startRecording() }
     fun recordStop() = action("停止录像") { repo.stopRecording() }
-    fun capture() = action("拍照") { repo.capture() }
+    fun capture() {
+        viewModelScope.launch {
+            _message.value = "正在拍照…"
+            val r = repo.captureVerified()
+            if (r.isFailure) {
+                _message.value = "拍照失败：${r.exceptionOrNull()?.message}"
+                return@launch
+            }
+
+            val newPhoto = r.getOrNull()
+            if (newPhoto != null) {
+                _message.value = "拍照成功：${newPhoto.name}"
+                loadMedia(DvrMediaFile.Kind.PHOTO)
+            } else {
+                _message.value = "拍照命令已发送，但未检测到新增照片"
+            }
+        }
+    }
     fun event() = action("事件录像") { repo.eventRecording() }
     fun mic(on: Boolean) = action(if (on) "开启麦克风" else "关闭麦克风") { repo.setMic(on) }
 
