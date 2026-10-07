@@ -62,6 +62,7 @@ class DvrRepository(context: Context) {
     suspend fun eventRecording() = command { DvrProtocol.video(it, "event") }
     suspend fun setMic(on: Boolean) = command { DvrProtocol.setMic(it, on) }
     suspend fun setDvr(on: Boolean) = command { DvrProtocol.setDvr(it, on) }
+    suspend fun removeSd() = command { DvrProtocol.removeSd(it) }
     suspend fun formatSd() = command { DvrProtocol.formatSd(it) }
 
     suspend fun listMedia(kind: DvrMediaFile.Kind): Result<List<DvrMediaFile>> = withContext(Dispatchers.IO) {
