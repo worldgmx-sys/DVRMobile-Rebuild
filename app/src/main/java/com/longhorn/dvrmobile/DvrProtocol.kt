@@ -8,7 +8,7 @@ object DvrProtocol {
     fun setDvr(ip: String, on: Boolean) = "${base(ip)}/cgi-bin/Config.cgi?action=set&property=DVR&value=${if (on) "ON" else "OFF"}"
     fun setMic(ip: String, on: Boolean) = "${base(ip)}/cgi-bin/Config.cgi?action=set&property=mic&value=${if (on) "ON" else "OFF"}"
     fun video(ip: String, value: String) = "${base(ip)}/cgi-bin/Config.cgi?action=set&property=Video&value=$value"
-    fun formatSd(ip: String) = "${base(ip)}/cgi-bin/Config.cgi?action=format&property=format"
+    fun removeSd(ip: String) = "${base(ip)}/cgi-bin/Config.cgi?action=rmove&property=sd"\n    fun formatSd(ip: String) = "${base(ip)}/cgi-bin/Config.cgi?action=format&property=format"
     fun list(ip: String, property: String, from: Int = 0) = "${base(ip)}/cgi-bin/Config.cgi?action=dir&property=$property&format=all&count=50000&from=$from"
     fun file(ip: String, path: String) = "${base(ip)}$path"
     fun thumbnail(ip: String, path: String) = "${base(ip)}/thumb$path"
