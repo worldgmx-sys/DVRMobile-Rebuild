@@ -57,7 +57,20 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     fun event() = action("事件录像") { repo.eventRecording() }
-    fun mic(on: Boolean) = action(if (on) "开启麦克风" else "关闭麦克风") { repo.setMic(on) }
+    fun mic(on: Boolean) = action(if (on) "开启录音" else "关闭录音") { repo.setMic(on) }
+    fun removeSd() = action("安全移除内存卡") { repo.removeSd() }
+    fun formatSd() = action("格式化内存卡") { repo.formatSd() }
+
+    fun download(file: DvrMediaFile) {
+        viewModelScope.launch {
+            val r = repo.download(file)
+            _message.value = if (r.isSuccess) {
+                "已加入下载：${file.name}"
+            } else {
+                "下载失败：${r.exceptionOrNull()?.message}"
+            }
+        }
+    }
 
     fun loadMedia(kind: DvrMediaFile.Kind = _media.value.kind) {
         _media.value = _media.value.copy(kind = kind, loading = true, error = null)
