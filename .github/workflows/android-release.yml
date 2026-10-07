@@ -59,7 +59,19 @@ jobs:
             echo "Missing ANDROID_KEYSTORE_BASE64 secret"
             exit 1
           fi
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/dvr-geely-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode --ignore-garbage > "$RUNNER_TEMP/dvr-geely-release.jks"
+          if [ ! -s "$RUNNER_TEMP/dvr-geely-release.jks" ]; then
+            echo "Decoded keystore is empty"
+            exit 1
+          fi
+
+      - name: Validate release keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          keytool -list             -keystore "$RUNNER_TEMP/dvr-geely-release.jks"             -storepass "$ANDROID_KEYSTORE_PASSWORD"             -alias "$ANDROID_KEY_ALIAS" >/dev/null
 
       - name: Build signed release APK
         shell: bash
