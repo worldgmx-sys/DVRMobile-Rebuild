@@ -71,7 +71,28 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          keytool -list             -keystore "$RUNNER_TEMP/dvr-geely-release.jks"             -storepass "$ANDROID_KEYSTORE_PASSWORD"             -alias "$ANDROID_KEY_ALIAS" >/dev/null
+          EXPECTED_SHA256="63da8816ef202cf134fadcdf18265713533bf9859be5b0b96089ceacf88a5dec"
+          ACTUAL_SHA256="$(sha256sum "$RUNNER_TEMP/dvr-geely-release.jks" | awk '{print $1}')"
+          echo "Keystore SHA-256: $ACTUAL_SHA256"
+
+          if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+            echo "ERROR: Decoded keystore does not match the official DVR Geely release keystore."
+            echo "Please replace ANDROID_KEYSTORE_BASE64 with the exact contents of keystore_base64.txt."
+            exit 1
+          fi
+
+          if [ "$ANDROID_KEY_ALIAS" != "dvr_geely_release" ]; then
+            echo "ERROR: ANDROID_KEY_ALIAS is incorrect. Expected: dvr_geely_release"
+            exit 1
+          fi
+
+          if ! keytool -list             -keystore "$RUNNER_TEMP/dvr-geely-release.jks"             -storepass "$ANDROID_KEYSTORE_PASSWORD"             -alias "$ANDROID_KEY_ALIAS" >/dev/null 2>&1; then
+            echo "ERROR: Keystore password is incorrect."
+            echo "Please set ANDROID_KEYSTORE_PASSWORD to the exact value in store_password.txt."
+            exit 1
+          fi
+
+          echo "Release keystore validation passed."
 
       - name: Build signed release APK
         shell: bash
