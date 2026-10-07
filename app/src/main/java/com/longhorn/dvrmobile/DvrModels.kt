@@ -1,4 +1,4 @@
-package com.longhorn.dvrmobile
+package com.longhorn.dvr.worldgm
 
 data class DvrStatus(
     val ip: String? = null,
