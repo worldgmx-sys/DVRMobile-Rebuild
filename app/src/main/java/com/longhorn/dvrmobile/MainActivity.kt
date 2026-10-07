@@ -460,6 +460,7 @@ private fun SettingsScreen(
     onChooseFirmware: (FirmwareKind) -> Unit,
     modifier: Modifier,
 ) {
+    val context = LocalContext.current
     var confirmAction by remember { mutableStateOf<String?>(null) }
     var firmwareKind by remember { mutableStateOf<FirmwareKind?>(null) }
     var appAuthValue by remember { mutableStateOf("") }
