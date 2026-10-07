@@ -80,7 +80,7 @@ private fun DvrApp(vm: DvrViewModel = viewModel()) {
             0 -> LiveScreen(status, message, vm, Modifier.padding(pad))
             1 -> MediaScreen(status, media, vm, Modifier.padding(pad))
             2 -> DeviceScreen(status, vm, Modifier.padding(pad))
-            else -> SettingsScreen(status, Modifier.padding(pad))
+            else -> SettingsScreen(status, message, vm, Modifier.padding(pad))
         }
     }
 }
@@ -275,6 +275,9 @@ private fun MediaScreen(
                             overflow = TextOverflow.Ellipsis,
                             fontWeight = FontWeight.Medium,
                         )
+                        IconButton(onClick = { vm.download(file) }) {
+                            Icon(Icons.Default.Download, "下载")
+                        }
                         IconButton(onClick = { selectedFile = null }) {
                             Icon(Icons.Default.Close, "关闭预览")
                         }
@@ -400,6 +403,9 @@ private fun MediaScreen(
                                         style = MaterialTheme.typography.bodySmall,
                                     )
                                 }
+                                IconButton(onClick = { vm.download(file) }) {
+                                    Icon(Icons.Default.Download, "下载")
+                                }
                                 Icon(Icons.Default.ChevronRight, null)
                             }
                         }
@@ -461,9 +467,58 @@ private fun DeviceScreen(status: DvrStatus, vm: DvrViewModel, modifier: Modifier
 }
 
 @Composable
-private fun SettingsScreen(status: DvrStatus, modifier: Modifier) {
+private fun SettingsScreen(
+    status: DvrStatus,
+    message: String?,
+    vm: DvrViewModel,
+    modifier: Modifier,
+) {
+    var confirmAction by remember { mutableStateOf<String?>(null) }
+
+    if (confirmAction != null) {
+        val formatting = confirmAction == "format"
+        AlertDialog(
+            onDismissRequest = { confirmAction = null },
+            icon = {
+                Icon(
+                    if (formatting) Icons.Default.Warning else Icons.Default.Eject,
+                    null
+                )
+            },
+            title = {
+                Text(if (formatting) "格式化内存卡？" else "安全移除内存卡？")
+            },
+            text = {
+                Text(
+                    if (formatting) {
+                        "格式化会删除记录仪内存卡中的全部录像和照片，此操作不可撤销。"
+                    } else {
+                        "将向记录仪发送原厂安全移除指令。移除完成后，再拔出内存卡。"
+                    }
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (formatting) vm.formatSd() else vm.removeSd()
+                        confirmAction = null
+                    }
+                ) {
+                    Text(if (formatting) "确认格式化" else "确认移除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmAction = null }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
     Column(
-        modifier.fillMaxSize().padding(20.dp),
+        modifier.fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text(
@@ -473,18 +528,100 @@ private fun SettingsScreen(status: DvrStatus, modifier: Modifier) {
         )
 
         ElevatedCard(shape = RoundedCornerShape(24.dp)) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("录音", style = MaterialTheme.typography.titleLarge)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("录像录音")
+                        Text(
+                            when (status.mic) {
+                                true -> "当前已开启"
+                                false -> "当前已关闭"
+                                null -> "等待设备状态"
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Switch(
+                        checked = status.mic == true,
+                        onCheckedChange = { vm.mic(it) },
+                        enabled = status.isConnected && status.mic != null,
+                    )
+                }
+            }
+        }
+
+        ElevatedCard(shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("手机版重构", style = MaterialTheme.typography.titleLarge)
+                Text("内存卡状态", style = MaterialTheme.typography.titleLarge)
+                StatusRow("状态", status.sdLabel)
+                StatusRow("总容量", status.totalSize ?: "—")
+                StatusRow("普通录像占用", status.usedNormalSpace ?: "—")
+                StatusRow("事件录像占用", status.usedEventSpace ?: "—")
+                StatusRow("照片占用", status.usedPhotoSpace ?: "—")
+            }
+        }
+
+        ElevatedCard(shape = RoundedCornerShape(24.dp)) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("高级", style = MaterialTheme.typography.titleLarge)
                 Text(
-                    "Android 16 · Material 3 · Edge-to-edge",
-                    color = MaterialTheme.colorScheme.primary
+                    "以下操作直接作用于记录仪内存卡。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
                 )
+
+                HorizontalDivider()
+
+                ListItem(
+                    headlineContent = { Text("安全移除内存卡") },
+                    supportingContent = { Text("停止使用内存卡后再物理拔出") },
+                    leadingContent = { Icon(Icons.Default.Eject, null) },
+                    trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                    modifier = Modifier.clickable(
+                        enabled = status.isConnected
+                    ) { confirmAction = "remove" }
+                )
+
+                HorizontalDivider()
+
+                ListItem(
+                    headlineContent = { Text("格式化内存卡") },
+                    supportingContent = { Text("删除全部录像和照片") },
+                    leadingContent = { Icon(Icons.Default.DeleteForever, null) },
+                    trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                    modifier = Modifier.clickable(
+                        enabled = status.isConnected
+                    ) { confirmAction = "format" }
+                )
+            }
+        }
+
+        ElevatedCard(shape = RoundedCornerShape(24.dp)) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("连接信息", style = MaterialTheme.typography.titleLarge)
                 StatusRow("DVR IP", status.ip ?: "未发现")
                 StatusRow("RTSP", status.ip?.let { DvrProtocol.rtsp(it) } ?: "—")
                 StatusRow("发现端口", "UDP 49142 / 53296")
                 StatusRow("视频传输", "RTSP / RTP-over-TCP")
             }
         }
+
+        message?.let {
+            Text(it, color = MaterialTheme.colorScheme.primary)
+        }
+
+        Text(
+            "下载的录像和照片保存到系统“下载/DVRMobile”目录。",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        Spacer(Modifier.height(10.dp))
     }
 }
 
