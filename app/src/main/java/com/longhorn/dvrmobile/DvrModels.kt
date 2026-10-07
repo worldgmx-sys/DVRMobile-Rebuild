@@ -38,5 +38,5 @@ data class DvrMediaFile(
     val name: String,
     val kind: Kind,
 ) {
-    enum class Kind { NORMAL, EVENT, PHOTO }
+    enum class Kind { NORMAL, EVENT, PARKING, PHOTO }
 }
