@@ -26,6 +26,9 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
     private val _media = MutableStateFlow(MediaUiState())
     val media: StateFlow<MediaUiState> = _media.asStateFlow()
 
+    private val _downloadDirectory = MutableStateFlow(repo.downloadTreeUri())
+    val downloadDirectory: StateFlow<String?> = _downloadDirectory.asStateFlow()
+
     init {
         repo.startDiscovery()
     }
@@ -35,9 +38,16 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
         probe()
     }
 
+    fun setDownloadDirectory(uri: String?) {
+        repo.setDownloadTreeUri(uri)
+        _downloadDirectory.value = uri
+        _message.value = if (uri == null) "已清除下载目录" else "已设置下载目录"
+    }
+
     fun probe() = action("正在测试连接") { repo.probe() }
     fun recordStart() = action("开始录像") { repo.startRecording() }
     fun recordStop() = action("停止录像") { repo.stopRecording() }
+
     fun capture() {
         viewModelScope.launch {
             _message.value = "正在拍照…"
@@ -46,7 +56,6 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
                 _message.value = "拍照失败：${r.exceptionOrNull()?.message}"
                 return@launch
             }
-
             val newPhoto = r.getOrNull()
             if (newPhoto != null) {
                 _message.value = "拍照成功：${newPhoto.name}"
@@ -56,19 +65,52 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
     fun event() = action("事件录像") { repo.eventRecording() }
     fun mic(on: Boolean) = action(if (on) "开启录音" else "关闭录音") { repo.setMic(on) }
     fun removeSd() = action("安全移除内存卡") { repo.removeSd() }
     fun formatSd() = action("格式化内存卡") { repo.formatSd() }
 
+    fun authorizeApp(value: String) = action("APP 授权") { repo.authorizeApp(value) }
+    fun setAuthTime(value: String) = action("设置录音授权时效") { repo.setAuthTime(value) }
+
+    fun delete(file: DvrMediaFile) {
+        viewModelScope.launch {
+            val r = repo.deleteMedia(file)
+            _message.value = if (r.isSuccess) "已删除：${file.name}" else "删除失败：${r.exceptionOrNull()?.message}"
+            if (r.isSuccess) loadMedia(_media.value.kind)
+        }
+    }
+
+    fun move(file: DvrMediaFile) {
+        viewModelScope.launch {
+            val r = repo.moveMedia(file)
+            _message.value = if (r.isSuccess) {
+                if (file.kind == DvrMediaFile.Kind.NORMAL) "已锁定为事件录像" else "已解除事件锁定"
+            } else {
+                "文件迁移失败：${r.exceptionOrNull()?.message}"
+            }
+            if (r.isSuccess) loadMedia(_media.value.kind)
+        }
+    }
+
     fun download(file: DvrMediaFile) {
         viewModelScope.launch {
+            _message.value = "正在下载：${file.name}"
             val r = repo.download(file)
             _message.value = if (r.isSuccess) {
-                "已加入下载：${file.name}"
+                "下载完成：${file.name}"
             } else {
                 "下载失败：${r.exceptionOrNull()?.message}"
             }
+        }
+    }
+
+    fun uploadFirmware(uri: String, kind: FirmwareKind) {
+        viewModelScope.launch {
+            _message.value = "正在上传${if (kind == FirmwareKind.SOC) "SOC" else "MCU"}固件…"
+            val r = repo.uploadFirmware(uri, kind)
+            _message.value = if (r.isSuccess) "固件已上传，等待设备升级" else "固件上传失败：${r.exceptionOrNull()?.message}"
         }
     }
 
