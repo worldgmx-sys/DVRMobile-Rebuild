@@ -1,4 +1,4 @@
-package com.longhorn.dvrmobile
+package com.longhorn.dvr.worldgm
 
 object DvrProtocol {
     fun base(ip: String) = "http://$ip"
