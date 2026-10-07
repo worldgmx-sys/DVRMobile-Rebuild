@@ -56,6 +56,7 @@ private fun DvrApp(vm: DvrViewModel = viewModel()) {
     val message by vm.message.collectAsStateWithLifecycle()
     val media by vm.media.collectAsStateWithLifecycle()
     val downloadDirectory by vm.downloadDirectory.collectAsStateWithLifecycle()
+    val downloads by vm.downloads.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var tab by remember { mutableIntStateOf(0) }
     var pendingFirmwareKind by remember { mutableStateOf<FirmwareKind?>(null) }
@@ -106,12 +107,13 @@ private fun DvrApp(vm: DvrViewModel = viewModel()) {
     ) { pad ->
         when (tab) {
             0 -> LiveScreen(status, message, vm, Modifier.padding(pad))
-            1 -> MediaScreen(status, media, message, vm, Modifier.padding(pad))
+            1 -> MediaScreen(status, media, message, downloads, vm, Modifier.padding(pad))
             2 -> DeviceScreen(status, vm, Modifier.padding(pad))
             else -> SettingsScreen(
                 status = status,
                 message = message,
                 downloadDirectory = downloadDirectory,
+                downloads = downloads,
                 vm = vm,
                 onChooseDownloadDirectory = { directoryLauncher.launch(null) },
                 onChooseFirmware = { kind ->
@@ -216,11 +218,17 @@ private fun MediaScreen(
     status: DvrStatus,
     state: MediaUiState,
     message: String?,
+    downloads: List<DownloadTask>,
     vm: DvrViewModel,
     modifier: Modifier,
 ) {
     var selectedFile by remember { mutableStateOf<DvrMediaFile?>(null) }
     var deleteTarget by remember { mutableStateOf<DvrMediaFile?>(null) }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) selectedFile = null
+    }
 
     deleteTarget?.let { file ->
         AlertDialog(
@@ -313,6 +321,14 @@ private fun MediaScreen(
             }
         }
 
+        if (downloads.isNotEmpty()) {
+            DownloadListSection(
+                downloads = downloads,
+                onClearFinished = { vm.clearFinishedDownloads() },
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)
+            )
+        }
+
         message?.let {
             Text(it, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp))
         }
@@ -330,6 +346,7 @@ private fun MediaScreen(
                 Text(if (state.kind == DvrMediaFile.Kind.PARKING) "当前列表中未发现停车录像" else "未解析到文件")
             }
             else -> LazyColumn(
+                state = listState,
                 contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -409,6 +426,7 @@ private fun SettingsScreen(
     status: DvrStatus,
     message: String?,
     downloadDirectory: String?,
+    downloads: List<DownloadTask>,
     vm: DvrViewModel,
     onChooseDownloadDirectory: () -> Unit,
     onChooseFirmware: (FirmwareKind) -> Unit,
@@ -510,6 +528,14 @@ private fun SettingsScreen(
                 if (downloadDirectory != null) {
                     TextButton(onClick = { vm.setDownloadDirectory(null) }) { Text("清除目录设置") }
                 }
+
+                if (downloads.isNotEmpty()) {
+                    HorizontalDivider()
+                    DownloadListSection(
+                        downloads = downloads,
+                        onClearFinished = { vm.clearFinishedDownloads() }
+                    )
+                }
             }
         }
 
@@ -574,6 +600,92 @@ private fun SettingsScreen(
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         Spacer(Modifier.height(10.dp))
     }
+}
+
+
+@Composable
+private fun DownloadListSection(
+    downloads: List<DownloadTask>,
+    onClearFinished: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("下载任务", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            if (downloads.any { it.state == DownloadState.COMPLETED || it.state == DownloadState.FAILED }) {
+                TextButton(onClick = onClearFinished) { Text("清理完成项") }
+            }
+        }
+
+        downloads.take(6).forEach { task ->
+            ElevatedCard(shape = RoundedCornerShape(16.dp)) {
+                Column(
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            task.fileName,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            when (task.state) {
+                                DownloadState.QUEUED -> "等待"
+                                DownloadState.DOWNLOADING -> if (task.totalBytes > 0) "${(task.progress * 100).toInt()}%" else "下载中"
+                                DownloadState.COMPLETED -> "完成"
+                                DownloadState.FAILED -> "失败"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (task.state == DownloadState.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    if (task.state == DownloadState.DOWNLOADING || task.state == DownloadState.QUEUED) {
+                        if (task.totalBytes > 0) {
+                            LinearProgressIndicator(
+                                progress = { task.progress },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+
+                    val sizeText = if (task.totalBytes > 0) {
+                        "${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}"
+                    } else {
+                        formatBytes(task.downloadedBytes)
+                    }
+                    Text(
+                        task.error ?: sizeText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (task.state == DownloadState.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        if (downloads.size > 6) {
+            Text(
+                "另有 ${downloads.size - 6} 个任务",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 0) return "—"
+    if (bytes < 1024) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return String.format("%.1f KB", kb)
+    val mb = kb / 1024.0
+    if (mb < 1024) return String.format("%.1f MB", mb)
+    return String.format("%.2f GB", mb / 1024.0)
 }
 
 @Composable
