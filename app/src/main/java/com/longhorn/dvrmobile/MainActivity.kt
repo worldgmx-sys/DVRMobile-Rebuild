@@ -605,7 +605,7 @@ private fun SettingsScreen(
         ElevatedCard(shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("固件升级", style = MaterialTheme.typography.titleLarge)
-                Text("复刻原厂 SOC / MCU 升级入口。", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                Text("SOC / MCU 固件升级入口。", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 OutlinedButton(onClick = { firmwareKind = FirmwareKind.SOC }, enabled = status.isConnected, modifier = Modifier.fillMaxWidth()) {
                     Text("选择 SOC 固件并升级")
                 }
@@ -634,6 +634,32 @@ private fun SettingsScreen(
             ) {
                 Text("开发者信息", style = MaterialTheme.typography.titleLarge)
                 StatusRow("开发者", "worldgmx-sys")
+                StatusRow("当前版本", BuildConfig.VERSION_NAME)
+                StatusRow("Build", BuildConfig.VERSION_CODE.toString())
+
+                Text(
+                    "开源说明：本应用为免费开源项目，仅用于兼容和管理对应行车记录仪设备，请勿通过任何渠道付费获取。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                HorizontalDivider()
+
+                ListItem(
+                    headlineContent = { Text("检查更新") },
+                    supportingContent = { Text("查看 GitHub 上的最新版本") },
+                    leadingContent = { Icon(Icons.Default.SystemUpdateAlt, null) },
+                    trailingContent = { Icon(Icons.Default.OpenInNew, null) },
+                    modifier = Modifier.clickable {
+                        val intent = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://github.com/worldgmx-sys/DVRMobile-Rebuild/releases")
+                        )
+                        context.startActivity(intent)
+                    }
+                )
+
+                HorizontalDivider()
 
                 ListItem(
                     headlineContent = { Text("GitHub") },
