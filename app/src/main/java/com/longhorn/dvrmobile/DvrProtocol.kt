@@ -29,7 +29,7 @@ object DvrProtocol {
         "${base(ip)}/cgi-bin/Config.cgi?action=set&property=AuthTime&value=$value"
 
     private fun encodePath(remotePath: String): String =
-        remotePath.replace("/", "$")
+        remotePath.replace('/', 36.toChar())
 
     fun delete(ip: String, remotePath: String) =
         "${base(ip)}/cgi-bin/Config.cgi?action=del&property=${encodePath(remotePath)}"
