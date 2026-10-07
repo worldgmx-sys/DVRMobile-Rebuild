@@ -1,4 +1,4 @@
-package com.longhorn.dvrmobile
+package com.longhorn.dvr.worldgm
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
