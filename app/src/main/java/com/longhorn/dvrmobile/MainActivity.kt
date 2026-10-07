@@ -20,6 +20,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -280,13 +282,20 @@ private fun MediaScreen(
                     val url = vm.mediaUrl(file)
                     if (file.kind != DvrMediaFile.Kind.PHOTO && url != null) {
                         HttpVideoPlayer(url)
+                    } else if (url != null) {
+                        AsyncImage(
+                            model = url,
+                            contentDescription = file.name,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 520.dp),
+                            contentScale = ContentScale.Fit,
+                        )
                     } else {
                         Box(
                             Modifier.fillMaxWidth().height(120.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                url ?: "无法生成文件地址",
+                                "无法生成文件地址",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -355,15 +364,24 @@ private fun MediaScreen(
                                     shape = RoundedCornerShape(14.dp),
                                     color = MaterialTheme.colorScheme.secondaryContainer,
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            if (file.kind == DvrMediaFile.Kind.PHOTO) {
-                                                Icons.Default.Image
-                                            } else {
-                                                Icons.Default.Movie
-                                            },
-                                            null
-                                        )
+                                    if (file.kind == DvrMediaFile.Kind.PHOTO) {
+                                        val photoUrl = vm.mediaUrl(file)
+                                        if (photoUrl != null) {
+                                            AsyncImage(
+                                                model = photoUrl,
+                                                contentDescription = file.name,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop,
+                                            )
+                                        } else {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(Icons.Default.Image, null)
+                                            }
+                                        }
+                                    } else {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.Movie, null)
+                                        }
                                     }
                                 }
                                 Spacer(Modifier.width(12.dp))
