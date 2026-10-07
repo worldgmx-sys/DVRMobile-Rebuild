@@ -111,7 +111,10 @@ class DvrRepository(context: Context) {
     fun thumbnailUrl(file: DvrMediaFile): String? =
         status.value.ip?.let { DvrProtocol.thumbnail(it, file.remotePath) }
 
-    suspend fun download(file: DvrMediaFile): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun download(
+        file: DvrMediaFile,
+        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> }
+    ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             val url = mediaUrl(file) ?: error("尚未发现记录仪")
             val tree = downloadTreeUri()?.let(Uri::parse)
@@ -129,9 +132,22 @@ class DvrRepository(context: Context) {
             http.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) error("HTTP ${response.code}")
                 val body = response.body ?: error("服务器未返回文件内容")
+                val total = body.contentLength()
                 resolver.openOutputStream(target.uri, "wt").use { output ->
                     if (output == null) error("无法打开目标文件")
-                    body.byteStream().use { input -> input.copyTo(output, 128 * 1024) }
+                    body.byteStream().use { input ->
+                        val buffer = ByteArray(128 * 1024)
+                        var downloaded = 0L
+                        onProgress(0L, total)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read <= 0) break
+                            output.write(buffer, 0, read)
+                            downloaded += read
+                            onProgress(downloaded, total)
+                        }
+                        output.flush()
+                    }
                 }
             }
             target.uri.toString()
