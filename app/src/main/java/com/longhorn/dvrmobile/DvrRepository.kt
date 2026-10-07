@@ -1,6 +1,9 @@
 package com.longhorn.dvrmobile
 
+import android.app.DownloadManager
 import android.content.Context
+import android.net.Uri
+import android.os.Environment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -9,7 +12,8 @@ import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 class DvrRepository(context: Context) {
-    private val discovery = DvrDiscovery(context)
+    private val appContext = context.applicationContext
+    private val discovery = DvrDiscovery(appContext)
     private val http = OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
@@ -79,6 +83,33 @@ class DvrRepository(context: Context) {
 
     fun thumbnailUrl(file: DvrMediaFile): String? =
         status.value.ip?.let { DvrProtocol.thumbnail(it, file.remotePath) }
+
+    fun download(file: DvrMediaFile): Result<Long> = runCatching {
+        val url = mediaUrl(file) ?: error("尚未发现记录仪")
+        val mime = when {
+            file.name.endsWith(".jpg", true) || file.name.endsWith(".jpeg", true) -> "image/jpeg"
+            file.name.endsWith(".png", true) -> "image/png"
+            file.name.endsWith(".mp4", true) -> "video/mp4"
+            file.name.endsWith(".mov", true) -> "video/quicktime"
+            file.name.endsWith(".avi", true) -> "video/x-msvideo"
+            else -> "application/octet-stream"
+        }
+
+        val request = DownloadManager.Request(Uri.parse(url))
+            .setTitle(file.name)
+            .setDescription("正在从行车记录仪下载")
+            .setMimeType(mime)
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(false)
+            .setDestinationInExternalPublicDir(
+                Environment.DIRECTORY_DOWNLOADS,
+                "DVRMobile/${file.name}"
+            )
+
+        val manager = appContext.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        manager.enqueue(request)
+    }
 
     private suspend fun command(urlForIp: (String) -> String): Result<String> = withContext(Dispatchers.IO) {
         val ip = status.value.ip
