@@ -1,4 +1,4 @@
-package com.longhorn.dvrmobile
+package com.longhorn.dvr.worldgm
 
 import android.view.ViewGroup
 import androidx.compose.foundation.layout.aspectRatio
