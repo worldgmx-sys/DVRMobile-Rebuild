@@ -5,15 +5,15 @@ plugins {
 }
 
 android {
-    namespace = "com.longhorn.dvrmobile"
+    namespace = "com.longhorn.dvr.worldgm"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.longhorn.dvrmobile"
+        applicationId = "com.longhorn.dvr.worldgm"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0-phase1"
+        versionName = "0.2.0"
     }
 
     compileOptions {
