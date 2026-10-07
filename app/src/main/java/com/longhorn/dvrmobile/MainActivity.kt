@@ -58,8 +58,35 @@ private fun DvrApp(vm: DvrViewModel = viewModel()) {
     val downloadDirectory by vm.downloadDirectory.collectAsStateWithLifecycle()
     val downloads by vm.downloads.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val noticePrefs = remember(context) {
+        context.getSharedPreferences("dvr_mobile", android.content.Context.MODE_PRIVATE)
+    }
+    var showFreeNotice by remember {
+        mutableStateOf(!noticePrefs.getBoolean("free_notice_acknowledged", false))
+    }
     var tab by remember { mutableIntStateOf(0) }
     var pendingFirmwareKind by remember { mutableStateOf<FirmwareKind?>(null) }
+
+    if (showFreeNotice) {
+        AlertDialog(
+            onDismissRequest = {},
+            icon = { Icon(Icons.Default.Info, null) },
+            title = { Text("提示") },
+            text = { Text("本应用完全免费 请勿任何渠道付费") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        noticePrefs.edit()
+                            .putBoolean("free_notice_acknowledged", true)
+                            .apply()
+                        showFreeNotice = false
+                    }
+                ) {
+                    Text("我已知晓")
+                }
+            }
+        )
+    }
 
     val directoryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -201,7 +228,7 @@ private fun LiveScreen(
                 StatusRow("录像", status.recordingLabel)
                 StatusRow("录音", when (status.mic) { true -> "开启"; false -> "关闭"; null -> "未知" })
                 StatusRow("SD 卡", status.sdLabel)
-                StatusRow("总容量", status.totalSize ?: "—")
+                StatusRow("总容量", status.totalSizeMb)
                 StatusRow("SoC", listOfNotNull(status.socVersion, status.innerVersion).joinToString(".").ifBlank { "—" })
                 StatusRow("MCU", status.mcuVersion ?: "—")
                 StatusRow("型号", status.dvrModel ?: "—")
@@ -504,9 +531,9 @@ private fun SettingsScreen(
                 Text("内存卡状态", style = MaterialTheme.typography.titleLarge)
                 StatusRow("状态", status.sdLabel)
                 StatusRow("总容量", status.totalSize ?: "—")
-                StatusRow("普通录像占用", status.usedNormalSpace ?: "—")
-                StatusRow("事件录像占用", status.usedEventSpace ?: "—")
-                StatusRow("照片占用", status.usedPhotoSpace ?: "—")
+                StatusRow("普通录像占用", status.usedNormalSpaceMb)
+                StatusRow("事件录像占用", status.usedEventSpaceMb)
+                StatusRow("照片占用", status.usedPhotoSpaceMb)
             }
         }
 
