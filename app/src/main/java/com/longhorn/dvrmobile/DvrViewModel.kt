@@ -15,6 +15,20 @@ data class MediaUiState(
     val error: String? = null,
 )
 
+enum class DownloadState { QUEUED, DOWNLOADING, COMPLETED, FAILED }
+
+data class DownloadTask(
+    val id: String,
+    val fileName: String,
+    val downloadedBytes: Long = 0L,
+    val totalBytes: Long = -1L,
+    val state: DownloadState = DownloadState.QUEUED,
+    val error: String? = null,
+) {
+    val progress: Float
+        get() = if (totalBytes > 0L) (downloadedBytes.toDouble() / totalBytes.toDouble()).toFloat().coerceIn(0f, 1f) else 0f
+}
+
 class DvrViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = DvrRepository(app)
 
@@ -28,6 +42,9 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _downloadDirectory = MutableStateFlow(repo.downloadTreeUri())
     val downloadDirectory: StateFlow<String?> = _downloadDirectory.asStateFlow()
+
+    private val _downloads = MutableStateFlow<List<DownloadTask>>(emptyList())
+    val downloads: StateFlow<List<DownloadTask>> = _downloads.asStateFlow()
 
     init {
         repo.startDiscovery()
@@ -95,14 +112,51 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun download(file: DvrMediaFile) {
+        val taskId = file.remotePath + "#" + System.currentTimeMillis()
+        _downloads.value = listOf(
+            DownloadTask(id = taskId, fileName = file.name, state = DownloadState.QUEUED)
+        ) + _downloads.value
+
         viewModelScope.launch {
-            _message.value = "正在下载：${file.name}"
-            val r = repo.download(file)
-            _message.value = if (r.isSuccess) {
-                "下载完成：${file.name}"
-            } else {
-                "下载失败：${r.exceptionOrNull()?.message}"
+            updateDownload(taskId) { it.copy(state = DownloadState.DOWNLOADING) }
+            val r = repo.download(file) { downloaded, total ->
+                updateDownload(taskId) {
+                    it.copy(
+                        downloadedBytes = downloaded,
+                        totalBytes = total,
+                        state = DownloadState.DOWNLOADING
+                    )
+                }
             }
+            if (r.isSuccess) {
+                updateDownload(taskId) {
+                    it.copy(
+                        downloadedBytes = if (it.totalBytes > 0) it.totalBytes else it.downloadedBytes,
+                        state = DownloadState.COMPLETED
+                    )
+                }
+                _message.value = "下载完成：${file.name}"
+            } else {
+                updateDownload(taskId) {
+                    it.copy(
+                        state = DownloadState.FAILED,
+                        error = r.exceptionOrNull()?.message ?: "未知错误"
+                    )
+                }
+                _message.value = "下载失败：${r.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
+    fun clearFinishedDownloads() {
+        _downloads.value = _downloads.value.filter {
+            it.state == DownloadState.QUEUED || it.state == DownloadState.DOWNLOADING
+        }
+    }
+
+    private fun updateDownload(id: String, transform: (DownloadTask) -> DownloadTask) {
+        _downloads.value = _downloads.value.map { task ->
+            if (task.id == id) transform(task) else task
         }
     }
 
