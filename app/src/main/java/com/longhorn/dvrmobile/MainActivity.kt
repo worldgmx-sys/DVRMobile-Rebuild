@@ -1,6 +1,7 @@
 package com.longhorn.dvr.worldgm
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -625,6 +626,37 @@ private fun SettingsScreen(
         }
 
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+
+        ElevatedCard(shape = RoundedCornerShape(24.dp)) {
+            Column(
+                Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("开发者信息", style = MaterialTheme.typography.titleLarge)
+                StatusRow("开发者", "worldgmx-sys")
+
+                ListItem(
+                    headlineContent = { Text("GitHub") },
+                    supportingContent = {
+                        Text(
+                            "github.com/worldgmx-sys/DVRMobile-Rebuild",
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    leadingContent = { Icon(Icons.Default.Code, null) },
+                    trailingContent = { Icon(Icons.Default.OpenInNew, null) },
+                    modifier = Modifier.clickable {
+                        val intent = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://github.com/worldgmx-sys/DVRMobile-Rebuild")
+                        )
+                        context.startActivity(intent)
+                    }
+                )
+            }
+        }
+
         Spacer(Modifier.height(10.dp))
     }
 }
