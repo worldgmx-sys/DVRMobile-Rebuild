@@ -28,14 +28,12 @@ jobs:
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          which sdkmanager || true
           if ! command -v sdkmanager >/dev/null 2>&1; then
             SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
             if [ -x "$SDKMANAGER" ]; then
               echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
             else
-              echo "sdkmanager not found"
-              find "$ANDROID_HOME" -maxdepth 4 -type f -name sdkmanager -print || true
+              find "$ANDROID_HOME" -maxdepth 5 -type f -name sdkmanager -print || true
               exit 1
             fi
           fi
@@ -45,22 +43,13 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
-          sdkmanager --list_installed
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
 
-      - name: Extract project
-        shell: bash
-        run: |
-          rm -rf DVRMobile_Rebuild_Phase1
-          unzip -q DVRMobile_Rebuild_Phase1_Source.zip
-          test -f DVRMobile_Rebuild_Phase1/settings.gradle.kts
-
       - name: Build debug APK
-        working-directory: DVRMobile_Rebuild_Phase1
         shell: bash
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
@@ -68,5 +57,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: DVRMobile-debug-apk
-          path: DVRMobile_Rebuild_Phase1/app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
