@@ -12,6 +12,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,13 +23,29 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Verify Android SDK
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          which sdkmanager || true
+          if ! command -v sdkmanager >/dev/null 2>&1; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            if [ -x "$SDKMANAGER" ]; then
+              echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+            else
+              echo "sdkmanager not found"
+              find "$ANDROID_HOME" -maxdepth 4 -type f -name sdkmanager -print || true
+              exit 1
+            fi
+          fi
 
       - name: Install Android API 36
+        shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+          sdkmanager --list_installed
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -36,13 +53,16 @@ jobs:
           gradle-version: '8.11.1'
 
       - name: Extract project
+        shell: bash
         run: |
+          rm -rf DVRMobile_Rebuild_Phase1
           unzip -q DVRMobile_Rebuild_Phase1_Source.zip
           test -f DVRMobile_Rebuild_Phase1/settings.gradle.kts
 
       - name: Build debug APK
         working-directory: DVRMobile_Rebuild_Phase1
-        run: gradle --no-daemon :app:assembleDebug
+        shell: bash
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
