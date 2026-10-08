@@ -69,11 +69,11 @@ fun SigmaStarAdvancedControls(
 
         ChoiceSetting("ISO", "ISO",
             listOf("ISO_AUTO", "ISO_100", "ISO_200", "ISO_400", "ISO_800", "ISO_1600", "ISO_3200"),
-            enabled, vm)
+            current["ISO"], enabled, vm)
 
         ChoiceSetting("白平衡", "AWB",
             listOf("Auto", "Daylight", "Cloudy", "Fluorescent1", "Fluorescent2", "Fluorescent3", "Incandescent"),
-            enabled, vm)
+            current["AWB"], enabled, vm)
 
         ChoiceSetting("曝光补偿", "EV",
             listOf(
@@ -81,10 +81,10 @@ fun SigmaStarAdvancedControls(
                 "EV0",
                 "EVP33", "EVP67", "EVP100", "EVP133", "EVP167", "EVP200"
             ),
-            enabled, vm)
+            current["EV"], enabled, vm)
 
         ChoiceSetting("日期/Logo 水印", "DateLogoStamp",
-            listOf("DATELOGO", "DATE", "LOGO", "OFF"), current["ISO"], current["AWB"], current["EV"], current["DateLogoStamp"], enabled, vm)
+            listOf("DATELOGO", "DATE", "LOGO", "OFF"), current["DateLogoStamp"], enabled, vm)
 
         NumericSetting("亮度", "Brightness", 0, 100, current["Brightness"], enabled, vm)
         NumericSetting("对比度", "Contrast", 0, 100, current["Contrast"], enabled, vm)
@@ -132,13 +132,13 @@ private fun ToggleChoice(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
         FilterChip(
-            selected = selectedValue.equals("ON", true) || selectedValue == "1" || selectedValue.equals("ENABLE", true),
+            selected = selectedValue?.equals("ON", true) == true || selectedValue == "1" || selectedValue?.equals("ENABLE", true) == true,
             onClick = { vm.setSigmaProperty(property, "ON", title) },
             enabled = enabled,
             label = { Text("开") }
         )
         FilterChip(
-            selected = selectedValue.equals("OFF", true) || selectedValue == "0" || selectedValue.equals("DISABLE", true),
+            selected = selectedValue?.equals("OFF", true) == true || selectedValue == "0" || selectedValue?.equals("DISABLE", true) == true,
             onClick = { vm.setSigmaProperty(property, "OFF", title) },
             enabled = enabled,
             label = { Text("关") }
