@@ -136,6 +136,85 @@ class DvrRepository(context: Context) {
         return command { DvrProtocol.configSet(it, property, value) }
     }
 
+    suspend fun syncAdvancedSettings(current: AdvancedDvrState): Result<AdvancedDvrState> =
+        withContext(Dispatchers.IO) {
+            val ip = status.value.ip
+                ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
+
+            runCatching {
+                var next = current.copy(loading = true, error = null)
+                val notes = mutableListOf<String>()
+
+                // AStar / PPG: cmd=3014 returns the command status table.
+                val ppgRaw = runCatching { get(DvrProtocol.ppgStatusAll(ip)) }.getOrNull()
+                val ppgMap = ppgRaw?.let(DvrResponseParser::ppgCommandMap).orEmpty()
+                val astarDetected = ppgMap.keys.any { it in setOf(9096, 9099, 9106, 9137) }
+
+                if (astarDetected) {
+                    val aiEnabled = ppgMap[9096]?.let { (statusValue, value) ->
+                        // Firmware Status ALL stores ALG_ENABLE in Status on this product.
+                        statusValue?.let { it == 1 } ?: value?.toIntOrNull()?.let { it == 1 }
+                    }
+
+                    fun commandInt(cmd: Int): Int? {
+                        val item = ppgMap[cmd] ?: return null
+                        return item.second?.toIntOrNull() ?: item.first
+                    }
+
+                    val parkingMode = ParkingMode.fromValue(commandInt(9137))
+                    val parkingGSensor = commandInt(9106)?.takeIf { it in 0..3 }
+                    val duration = commandInt(9099)?.takeIf { it in 0..120 }
+                    val aiActive = aiActiveTest().getOrNull()
+                    val roi = getPeopleRoi().getOrNull()
+
+                    next = next.copy(
+                        aiActive = aiActive ?: next.aiActive,
+                        aiEnabled = aiEnabled ?: next.aiEnabled,
+                        parkingMode = parkingMode ?: next.parkingMode,
+                        parkingGSensorLevel = parkingGSensor ?: next.parkingGSensorLevel,
+                        peopleDetectDuration = duration ?: next.peopleDetectDuration,
+                        peopleRoi = roi ?: next.peopleRoi,
+                    )
+                    notes += "AStar/PPG 设置已同步"
+                }
+
+                // SigmaStar: only enumerate the full property catalog after a successful probe,
+                // avoiding dozens of pointless requests on AStar devices.
+                val sigmaProbe = getSigmaProperty("VideoRes").getOrNull()
+                if (sigmaProbe != null) {
+                    val sigma = linkedMapOf<String, String>()
+                    sigma["VideoRes"] = sigmaProbe
+                    DvrBackupCatalog.sigmaReadableProperties
+                        .filterNot { it == "VideoRes" }
+                        .forEach { property ->
+                            getSigmaProperty(property).getOrNull()?.let { value ->
+                                if (value.isNotBlank()) sigma[property] = value
+                            }
+                        }
+
+                    next = next.copy(
+                        sigmaValues = sigma,
+                        sigmaParkingMonitor = sigma["ParkingMonitor"]?.let {
+                            it.equals("ENABLE", true) || it.equals("ON", true) || it == "1"
+                        },
+                        sigmaGSensor = sigma["GSensor"],
+                        sigmaPowerOnGSensor = sigma["PowerOnGSensor"],
+                    )
+                    notes += "SigmaStar 设置已同步 ${sigma.size} 项"
+                }
+
+                if (!astarDetected && sigmaProbe == null) {
+                    notes += "未识别到可读取的高级设置接口"
+                }
+
+                next.copy(
+                    loading = false,
+                    lastRawResponse = notes.joinToString("；"),
+                    error = null,
+                )
+            }
+        }
+
     suspend fun collectSettingsBackup(
         appVersion: String,
         advanced: AdvancedDvrState,
