@@ -13,6 +13,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AdvancedSettingsSection(
     status: DvrStatus,
@@ -184,7 +185,7 @@ fun AdvancedSettingsSection(
                 )
                 Button(
                     onClick = { durationText.toIntOrNull()?.let(vm::setPeopleDetectDuration) },
-                    enabled = status.isConnected && (durationText.toIntOrNull() in 0..120),
+                    enabled = status.isConnected && (durationText.toIntOrNull()?.let { it in 0..120 } == true),
                 ) { Text("设置") }
             }
 
