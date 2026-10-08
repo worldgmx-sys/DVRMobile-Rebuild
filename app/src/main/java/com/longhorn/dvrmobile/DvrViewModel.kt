@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 data class MediaUiState(
@@ -51,6 +53,17 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         repo.startDiscovery()
+        viewModelScope.launch {
+            repo.status
+                .map { it.ip }
+                .distinctUntilChanged()
+                .collect { ip ->
+                    if (!ip.isNullOrBlank()) {
+                        repo.initializeClient(BuildConfig.VERSION_CODE.toLong())
+                        refreshAdvanced()
+                    }
+                }
+        }
     }
 
     fun manualIp(ip: String) {
