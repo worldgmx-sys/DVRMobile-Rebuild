@@ -44,7 +44,7 @@ object DvrProtocol {
         )
         par?.let { params += "par=${encode(it)}" }
         str?.let { params += "str=${encode(it)}" }
-        return "${base(ip)}/index.asp?${params.joinToString("&")}"
+        return "${base(ip)}/?${params.joinToString("&")}"
     }
 
     fun aiActiveTest(ip: String) = ppg(ip, 9023)
