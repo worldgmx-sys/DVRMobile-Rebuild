@@ -52,6 +52,67 @@ class DvrRepository(context: Context) {
     suspend fun authorizeApp(value: String) = command { DvrProtocol.setApp(it, value) }
     suspend fun setAuthTime(value: String) = command { DvrProtocol.setAuthTime(it, value) }
 
+    suspend fun initializeClient(versionCode: Long): Result<String> =
+        command { DvrProtocol.setApp(it, versionCode.toString()) }
+
+    suspend fun aiActiveTest(): Result<Boolean> = withContext(Dispatchers.IO) {
+        val ip = status.value.ip
+            ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
+        runCatching {
+            val raw = get(DvrProtocol.aiActiveTest(ip))
+            DvrResponseParser.ppgInt(raw) == 1
+        }
+    }
+
+    suspend fun setAlgEnabled(enabled: Boolean): Result<String> =
+        command { DvrProtocol.setAlgEnabled(it, enabled) }
+
+    suspend fun setParkingMode(mode: ParkingMode): Result<String> =
+        command { DvrProtocol.setParkingModeAStar(it, mode.value) }
+
+    suspend fun setParkingGSensor(level: Int): Result<String> {
+        require(level in 0..3) { "停车 G-sensor 档位必须为 0..3" }
+        return command { DvrProtocol.setParkingGSensorAStar(it, level) }
+    }
+
+    suspend fun getPeopleRoi(): Result<String> = withContext(Dispatchers.IO) {
+        val ip = status.value.ip
+            ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
+        runCatching {
+            val raw = get(DvrProtocol.getPeopleRoi(ip))
+            DvrResponseParser.normalizeRoi(raw) ?: error("设备未返回可识别的 ROI")
+        }
+    }
+
+    suspend fun setPeopleRoi(roi: String): Result<String> {
+        require(DvrResponseParser.isValidRoi(roi)) {
+            "ROI 需为 4~6 个 1920×1080 像素坐标点，例如 0,1080;0,0;1920,0;1920,1080"
+        }
+        return command { DvrProtocol.setPeopleRoi(it, roi) }
+    }
+
+    suspend fun setPeopleDetectDuration(value: Int): Result<String> {
+        require(value in 0..120) { "人员检测持续时间参数必须为 0..120" }
+        return command { DvrProtocol.setPeopleDetectDuration(it, value) }
+    }
+
+    suspend fun setSigmaParkingMonitor(enabled: Boolean): Result<String> =
+        command { DvrProtocol.setParkingMonitor(it, enabled) }
+
+    suspend fun setSigmaGSensor(value: String): Result<String> {
+        require(value in setOf("OFF", "LEVEL0", "LEVEL1", "LEVEL2", "LEVEL3", "LEVEL4")) {
+            "无效的行车 G-sensor 档位"
+        }
+        return command { DvrProtocol.setGSensor(it, value) }
+    }
+
+    suspend fun setSigmaPowerOnGSensor(value: String): Result<String> {
+        require(value in setOf("OFF", "LEVEL0", "LEVEL1", "LEVEL2")) {
+            "无效的停车唤醒 G-sensor 档位"
+        }
+        return command { DvrProtocol.setPowerOnGSensor(it, value) }
+    }
+
     suspend fun captureVerified(): Result<DvrMediaFile?> = withContext(Dispatchers.IO) {
         val ip = status.value.ip
             ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
