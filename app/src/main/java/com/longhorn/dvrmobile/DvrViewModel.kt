@@ -118,19 +118,16 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshAdvanced() {
         viewModelScope.launch {
             _advanced.value = _advanced.value.copy(loading = true, error = null)
-            val ai = repo.aiActiveTest()
-            val roi = repo.getPeopleRoi()
-            _advanced.value = _advanced.value.copy(
-                loading = false,
-                aiActive = ai.getOrNull(),
-                peopleRoi = roi.getOrNull() ?: _advanced.value.peopleRoi,
-                lastRawResponse = when {
-                    ai.isFailure -> ai.exceptionOrNull()?.message
-                    roi.isFailure -> roi.exceptionOrNull()?.message
-                    else -> "高级能力探测完成"
-                },
-                error = null,
-            )
+            val synced = repo.syncAdvancedSettings(_advanced.value)
+            _advanced.value = if (synced.isSuccess) {
+                synced.getOrThrow()
+            } else {
+                _advanced.value.copy(
+                    loading = false,
+                    error = synced.exceptionOrNull()?.message,
+                    lastRawResponse = "设置同步失败：${synced.exceptionOrNull()?.message}",
+                )
+            }
         }
     }
 
@@ -247,6 +244,9 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val result = repo.setSigmaProperty(property, value)
             _message.value = if (result.isSuccess) {
+                _advanced.value = _advanced.value.copy(
+                    sigmaValues = _advanced.value.sigmaValues + (property to value)
+                )
                 "$label 已设置为 $value"
             } else {
                 "$label 设置失败：${result.exceptionOrNull()?.message}"
