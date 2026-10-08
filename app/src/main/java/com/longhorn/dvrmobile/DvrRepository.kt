@@ -114,6 +114,15 @@ class DvrRepository(context: Context) {
     }
 
 
+    suspend fun getSigmaProperty(property: String): Result<String> = withContext(Dispatchers.IO) {
+        val ip = status.value.ip
+            ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
+        runCatching {
+            val raw = get(DvrProtocol.configGet(ip, property))
+            parseConfigValue(raw, property) ?: error("设备未返回可识别的 $property")
+        }
+    }
+
     suspend fun setSigmaProperty(property: String, value: String): Result<String> {
         val allowed = setOf(
             "VideoRes", "LoopingVideo", "MotionDetect", "MotionVideoTime",
@@ -126,6 +135,170 @@ class DvrRepository(context: Context) {
         require(property in allowed) { "不允许的 SigmaStar 参数：$property" }
         return command { DvrProtocol.configSet(it, property, value) }
     }
+
+    suspend fun collectSettingsBackup(
+        appVersion: String,
+        advanced: AdvancedDvrState,
+    ): Result<DvrSettingsBackup> = withContext(Dispatchers.IO) {
+        runCatching {
+            val device = status.value
+            check(device.isConnected) { "尚未发现记录仪" }
+
+            val sigma = linkedMapOf<String, String>()
+            DvrBackupCatalog.sigmaReadableProperties.forEach { property ->
+                getSigmaProperty(property).getOrNull()?.let { value ->
+                    if (value.isNotBlank()) sigma[property] = value
+                }
+            }
+
+            val liveRoi = getPeopleRoi().getOrNull() ?: advanced.peopleRoi.takeIf {
+                DvrResponseParser.isValidRoi(it)
+            }
+            val aiActive = aiActiveTest().getOrNull()
+
+            DvrSettingsBackup(
+                appVersion = appVersion,
+                deviceModel = device.dvrModel,
+                socVersion = device.socVersion,
+                mcuVersion = device.mcuVersion,
+                dvrEnabled = device.dvrEnabled,
+                micEnabled = device.mic,
+                sigma = sigma,
+                aiEnabled = advanced.aiEnabled,
+                parkingMode = advanced.parkingMode?.value,
+                parkingGSensor = advanced.parkingGSensorLevel,
+                peopleRoi = liveRoi,
+                peopleDetectDuration = advanced.peopleDetectDuration,
+            ).also {
+                // AI active is deliberately not persisted as a setting; it is runtime/license state.
+                @Suppress("UNUSED_VARIABLE")
+                val ignoredRuntimeState = aiActive
+            }
+        }
+    }
+
+    suspend fun writeSettingsBackup(uriString: String, backup: DvrSettingsBackup): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val uri = Uri.parse(uriString)
+                resolver.openOutputStream(uri, "wt").use { output ->
+                    checkNotNull(output) { "无法打开备份文件" }
+                    output.writer(Charsets.UTF_8).use { writer ->
+                        writer.write(backup.toJson())
+                    }
+                }
+            }
+        }
+
+    suspend fun readSettingsBackup(uriString: String): Result<DvrSettingsBackup> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val uri = Uri.parse(uriString)
+                val text = resolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    ?: error("无法读取备份文件")
+                DvrSettingsBackup.fromJson(text)
+            }
+        }
+
+    suspend fun restoreSettingsBackup(backup: DvrSettingsBackup): Result<RestoreReport> =
+        withContext(Dispatchers.IO) {
+            val ip = status.value.ip
+                ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
+
+            runCatching {
+                var applied = 0
+                var skipped = 0
+                var failed = 0
+                var restartMayBeRequired = false
+                val details = mutableListOf<String>()
+
+                suspend fun applySetting(label: String, block: suspend () -> Result<String>) {
+                    val result = block()
+                    if (result.isSuccess) {
+                        applied++
+                        details += "成功：$label"
+                    } else {
+                        failed++
+                        details += "失败：$label - ${result.exceptionOrNull()?.message ?: "未知错误"}"
+                    }
+                }
+
+                backup.dvrEnabled?.let { value ->
+                    applySetting("DVR 开关=$value") { setDvr(value) }
+                } ?: run { skipped++ }
+
+                backup.micEnabled?.let { value ->
+                    applySetting("录音开关=$value") { setMic(value) }
+                } ?: run { skipped++ }
+
+                backup.sigma.forEach { (property, value) ->
+                    if (property !in DvrBackupCatalog.sigmaWritableProperties) {
+                        skipped++
+                        details += "跳过：$property 不在允许恢复列表"
+                    } else {
+                        when (property) {
+                            "ParkingMonitor" -> applySetting("$property=$value") {
+                                setSigmaParkingMonitor(value.equals("ENABLE", true) || value == "1" || value.equals("ON", true))
+                            }
+                            "GSensor" -> applySetting("$property=$value") { setSigmaGSensor(value) }
+                            "PowerOnGSensor" -> applySetting("$property=$value") { setSigmaPowerOnGSensor(value) }
+                            else -> applySetting("$property=$value") { setSigmaProperty(property, value) }
+                        }
+                    }
+                }
+
+                backup.peopleRoi?.let { roi ->
+                    if (DvrResponseParser.isValidRoi(roi)) {
+                        applySetting("人员检测 ROI") { setPeopleRoi(roi) }
+                    } else {
+                        skipped++
+                        details += "跳过：备份中的 ROI 无效"
+                    }
+                } ?: run { skipped++ }
+
+                backup.peopleDetectDuration?.let { value ->
+                    if (value in 0..120) {
+                        applySetting("人员检测持续时间=$value") { setPeopleDetectDuration(value) }
+                    } else {
+                        skipped++
+                        details += "跳过：人员检测持续时间超出安全范围"
+                    }
+                } ?: run { skipped++ }
+
+                backup.parkingGSensor?.let { level ->
+                    if (level in 0..3) {
+                        applySetting("AStar 停车 G-sensor=$level") { setParkingGSensor(level) }
+                    } else {
+                        skipped++
+                        details += "跳过：AStar 停车 G-sensor 档位无效"
+                    }
+                } ?: run { skipped++ }
+
+                backup.parkingMode?.let { value ->
+                    val mode = ParkingMode.fromValue(value)
+                    if (mode != null) {
+                        applySetting("AStar 驻车模式=${mode.label}") { setParkingMode(mode) }
+                    } else {
+                        skipped++
+                        details += "跳过：未知驻车模式 $value"
+                    }
+                } ?: run { skipped++ }
+
+                // Apply AI enable last because original firmware may immediately reboot after changing it.
+                backup.aiEnabled?.let { enabled ->
+                    restartMayBeRequired = true
+                    applySetting("AI 总开关=$enabled") { setAlgEnabled(enabled) }
+                } ?: run { skipped++ }
+
+                RestoreReport(
+                    applied = applied,
+                    skipped = skipped,
+                    failed = failed,
+                    restartMayBeRequired = restartMayBeRequired,
+                    details = details,
+                )
+            }
+        }
 
     suspend fun captureVerified(): Result<DvrMediaFile?> = withContext(Dispatchers.IO) {
         val ip = status.value.ip
@@ -276,6 +449,36 @@ class DvrRepository(context: Context) {
             if (!resp.isSuccessful) error("HTTP ${resp.code}")
             resp.body?.string().orEmpty()
         }
+    }
+
+    private fun parseConfigValue(raw: String, property: String): String? {
+        val text = raw.trim()
+        if (text.isBlank()) return null
+        val lower = text.lowercase()
+        if ("unsupported" in lower || "not support" in lower || "unknown property" in lower) return null
+
+        DvrResponseParser.xmlValue(text)?.takeIf { it.isNotBlank() }?.let { return it }
+
+        val propertyRegex = Regex(
+            """(?:^|[\s<>&;])${Regex.escape(property)}\s*[:=]\s*["']?([^"'<>;&\r\n]+)""",
+            RegexOption.IGNORE_CASE
+        )
+        propertyRegex.find(text)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }?.let {
+            return it
+        }
+
+        val genericValue = Regex(
+            """\bvalue\s*[:=]\s*["']?([^"'<>;&\r\n]+)""",
+            RegexOption.IGNORE_CASE
+        ).find(text)?.groupValues?.getOrNull(1)?.trim()
+        if (!genericValue.isNullOrBlank()) return genericValue
+
+        if (text.length <= 96 && '<' !in text && '\n' !in text && '\r' !in text &&
+            !text.contains("error", true) && !text.contains("fail", true)
+        ) {
+            return text.trim('"', '\'', ' ')
+        }
+        return null
     }
 
     private fun mimeFor(name: String): String = when {
