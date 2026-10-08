@@ -233,6 +233,12 @@ fun AdvancedSettingsSection(
                 }
             }
 
+            HorizontalDivider()
+            SigmaStarAdvancedControls(
+                enabled = status.isConnected,
+                vm = vm,
+            )
+
             advanced.lastRawResponse?.let {
                 Text(
                     it,
