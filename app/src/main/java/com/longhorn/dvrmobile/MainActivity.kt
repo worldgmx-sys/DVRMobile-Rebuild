@@ -111,6 +111,19 @@ private fun DvrApp(vm: DvrViewModel = viewModel()) {
         pendingFirmwareKind = null
     }
 
+
+    val backupLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) vm.exportSettingsBackup(uri.toString())
+    }
+
+    val restoreLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) vm.restoreSettingsBackup(uri.toString())
+    }
+
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -147,6 +160,14 @@ private fun DvrApp(vm: DvrViewModel = viewModel()) {
                 onChooseFirmware = { kind ->
                     pendingFirmwareKind = kind
                     firmwareLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                },
+                onBackupSettings = {
+                    val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+                        .format(java.util.Date())
+                    backupLauncher.launch("DVR-Geely-settings-$stamp.json")
+                },
+                onRestoreSettings = {
+                    restoreLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
                 },
                 modifier = Modifier.padding(pad),
             )
@@ -458,6 +479,8 @@ private fun SettingsScreen(
     vm: DvrViewModel,
     onChooseDownloadDirectory: () -> Unit,
     onChooseFirmware: (FirmwareKind) -> Unit,
+    onBackupSettings: () -> Unit,
+    onRestoreSettings: () -> Unit,
     modifier: Modifier,
 ) {
     val context = LocalContext.current
@@ -465,6 +488,29 @@ private fun SettingsScreen(
     var firmwareKind by remember { mutableStateOf<FirmwareKind?>(null) }
     var appAuthValue by remember { mutableStateOf("") }
     var authTimeValue by remember { mutableStateOf("") }
+    var showRestoreConfirm by remember { mutableStateOf(false) }
+
+    if (showRestoreConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRestoreConfirm = false },
+            icon = { Icon(Icons.Default.Restore, null) },
+            title = { Text("恢复记录仪设置？") },
+            text = {
+                Text(
+                    "恢复会覆盖备份中包含的设置。AI 总开关变化可能触发 DVR 自动重启；请保持车辆供电稳定，不要在恢复过程中断电。"
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showRestoreConfirm = false
+                    onRestoreSettings()
+                }) { Text("选择备份并恢复") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRestoreConfirm = false }) { Text("取消") }
+            }
+        )
+    }
 
     confirmAction?.let { action ->
         val formatting = action == "format"
@@ -565,6 +611,40 @@ private fun SettingsScreen(
                         onClearFinished = { vm.clearFinishedDownloads() }
                     )
                 }
+            }
+        }
+
+        ElevatedCard(shape = RoundedCornerShape(24.dp)) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("设置备份与恢复", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "备份会实时读取记录仪当前可查询参数并保存为 JSON。恢复只写入已确认协议的字段；不支持或未采集的字段会跳过。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Button(
+                    onClick = onBackupSettings,
+                    enabled = status.isConnected,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Backup, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("一键备份记录仪设置")
+                }
+                OutlinedButton(
+                    onClick = { showRestoreConfirm = true },
+                    enabled = status.isConnected,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Restore, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("从备份恢复设置")
+                }
+                Text(
+                    "备份文件包含设备型号和固件版本信息；若备份设备型号与当前设备不同，恢复会自动停止。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
 
