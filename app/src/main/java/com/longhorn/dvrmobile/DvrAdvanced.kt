@@ -23,6 +23,7 @@ data class AdvancedDvrState(
     val sigmaParkingMonitor: Boolean? = null,
     val sigmaGSensor: String? = null,
     val sigmaPowerOnGSensor: String? = null,
+    val sigmaValues: Map<String, String> = emptyMap(),
     val lastRawResponse: String? = null,
     val error: String? = null,
 ) {
@@ -46,6 +47,28 @@ object DvrResponseParser {
         xmlValue(raw)?.toIntOrNull()
             ?: xmlStatus(raw)?.toIntOrNull()
             ?: firstInt(raw)
+
+    fun ppgCommandMap(raw: String): Map<Int, Pair<Int?, String?>> {
+        val result = linkedMapOf<Int, Pair<Int?, String?>>()
+        val blockRegex = Regex(
+            """<Cmd>\s*(\d+)\s*</Cmd>(.*?)(?=<Cmd>|</Function>|$)""",
+            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+        )
+        blockRegex.findAll(raw).forEach { match ->
+            val cmd = match.groupValues[1].toIntOrNull() ?: return@forEach
+            val body = match.groupValues[2]
+            val status = Regex(
+                """<Status>\s*([^<]+?)\s*</Status>""",
+                RegexOption.IGNORE_CASE
+            ).find(body)?.groupValues?.getOrNull(1)?.trim()?.toIntOrNull()
+            val value = Regex(
+                """<Value>\s*([^<]+?)\s*</Value>""",
+                RegexOption.IGNORE_CASE
+            ).find(body)?.groupValues?.getOrNull(1)?.trim()
+            result[cmd] = status to value
+        }
+        return result
+    }
 
     fun normalizeRoi(raw: String): String? {
         val value = xmlValue(raw) ?: raw
