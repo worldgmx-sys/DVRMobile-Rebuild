@@ -243,6 +243,18 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun setSigmaProperty(property: String, value: String, label: String = property) {
+        viewModelScope.launch {
+            val result = repo.setSigmaProperty(property, value)
+            _message.value = if (result.isSuccess) {
+                "$label 已设置为 $value"
+            } else {
+                "$label 设置失败：${result.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
+
     fun delete(file: DvrMediaFile) {
         viewModelScope.launch {
             val r = repo.deleteMedia(file)
