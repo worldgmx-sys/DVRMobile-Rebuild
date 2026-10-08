@@ -113,6 +113,20 @@ class DvrRepository(context: Context) {
         return command { DvrProtocol.setPowerOnGSensor(it, value) }
     }
 
+
+    suspend fun setSigmaProperty(property: String, value: String): Result<String> {
+        val allowed = setOf(
+            "VideoRes", "LoopingVideo", "MotionDetect", "MotionVideoTime",
+            "LDWS", "FCWS", "SAG", "NightMode", "WNR", "HDR",
+            "SlowMotion", "Timelapse", "AutoRec", "VideoPreRecord",
+            "MicSensitivity", "VideoQuality", "VoiceSwitch", "Flicker",
+            "ISO", "AWB", "EV", "DateLogoStamp", "GpsStamp", "SpeedStamp",
+            "Brightness", "Contrast", "Saturation", "Sharpness"
+        )
+        require(property in allowed) { "不允许的 SigmaStar 参数：$property" }
+        return command { DvrProtocol.configSet(it, property, value) }
+    }
+
     suspend fun captureVerified(): Result<DvrMediaFile?> = withContext(Dispatchers.IO) {
         val ip = status.value.ip
             ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
