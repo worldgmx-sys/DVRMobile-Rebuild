@@ -255,6 +255,72 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
     }
 
 
+    fun exportSettingsBackup(uriString: String) {
+        viewModelScope.launch {
+            _message.value = "正在读取记录仪设置并生成备份…"
+            val backupResult = repo.collectSettingsBackup(
+                appVersion = BuildConfig.VERSION_NAME,
+                advanced = _advanced.value,
+            )
+            if (backupResult.isFailure) {
+                _message.value = "备份失败：${backupResult.exceptionOrNull()?.message}"
+                return@launch
+            }
+
+            val backup = backupResult.getOrThrow()
+            val writeResult = repo.writeSettingsBackup(uriString, backup)
+            _message.value = if (writeResult.isSuccess) {
+                "设置备份完成：已采集 ${backup.sigma.size} 项 SigmaStar 参数" +
+                    if (backup.peopleRoi != null) "，包含 Sentinel ROI" else ""
+            } else {
+                "备份文件写入失败：${writeResult.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
+    fun restoreSettingsBackup(uriString: String) {
+        viewModelScope.launch {
+            _message.value = "正在读取备份文件…"
+            val backupResult = repo.readSettingsBackup(uriString)
+            if (backupResult.isFailure) {
+                _message.value = "读取备份失败：${backupResult.exceptionOrNull()?.message}"
+                return@launch
+            }
+
+            val backup = backupResult.getOrThrow()
+            val current = status.value
+            val modelMismatch = !backup.deviceModel.isNullOrBlank() &&
+                !current.dvrModel.isNullOrBlank() &&
+                !backup.deviceModel.equals(current.dvrModel, ignoreCase = true)
+
+            if (modelMismatch) {
+                _message.value = "恢复已停止：备份设备型号 ${backup.deviceModel} 与当前设备 ${current.dvrModel} 不一致"
+                return@launch
+            }
+
+            _message.value = "正在恢复记录仪设置，请保持设备供电和网络连接…"
+            val restore = repo.restoreSettingsBackup(backup)
+            if (restore.isSuccess) {
+                val report = restore.getOrThrow()
+                _message.value = report.summary
+                _advanced.value = _advanced.value.copy(
+                    aiEnabled = backup.aiEnabled ?: _advanced.value.aiEnabled,
+                    parkingMode = ParkingMode.fromValue(backup.parkingMode) ?: _advanced.value.parkingMode,
+                    parkingGSensorLevel = backup.parkingGSensor ?: _advanced.value.parkingGSensorLevel,
+                    peopleRoi = backup.peopleRoi ?: _advanced.value.peopleRoi,
+                    peopleDetectDuration = backup.peopleDetectDuration ?: _advanced.value.peopleDetectDuration,
+                    sigmaParkingMonitor = backup.sigma["ParkingMonitor"]?.let {
+                        it.equals("ENABLE", true) || it.equals("ON", true) || it == "1"
+                    } ?: _advanced.value.sigmaParkingMonitor,
+                    sigmaGSensor = backup.sigma["GSensor"] ?: _advanced.value.sigmaGSensor,
+                    sigmaPowerOnGSensor = backup.sigma["PowerOnGSensor"] ?: _advanced.value.sigmaPowerOnGSensor,
+                )
+            } else {
+                _message.value = "恢复失败：${restore.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
     fun delete(file: DvrMediaFile) {
         viewModelScope.launch {
             val r = repo.deleteMedia(file)
