@@ -568,6 +568,8 @@ private fun SettingsScreen(
             }
         }
 
+        AdvancedSettingsSection(status = status, vm = vm)
+
         ElevatedCard(shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("高级", style = MaterialTheme.typography.titleLarge)
@@ -592,14 +594,36 @@ private fun SettingsScreen(
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("原厂授权机制", style = MaterialTheme.typography.titleLarge)
                 Text(
-                    "原 APK 存在 setapp 与 AuthTime 接口，但具体 value 由原厂业务逻辑生成；这里作为高级兼容入口保留。",
+                    "已恢复原厂逻辑：setapp 使用当前 APK versionCode；录音 AuthTime 枚举为 360天=0、180天=1、90天=2。连接测试成功时会自动发送当前 versionCode。",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
-                OutlinedTextField(appAuthValue, { appAuthValue = it }, label = { Text("setapp value") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Button(onClick = { vm.authorizeApp(appAuthValue) }, enabled = status.isConnected && appAuthValue.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("发送 APP 授权") }
-                OutlinedTextField(authTimeValue, { authTimeValue = it }, label = { Text("AuthTime value") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Button(onClick = { vm.setAuthTime(authTimeValue) }, enabled = status.isConnected && authTimeValue.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("发送录音授权时效") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = false,
+                        onClick = { vm.setAudioAuthPreset(360) },
+                        enabled = status.isConnected,
+                        label = { Text("360 天") }
+                    )
+                    FilterChip(
+                        selected = false,
+                        onClick = { vm.setAudioAuthPreset(180) },
+                        enabled = status.isConnected,
+                        label = { Text("180 天") }
+                    )
+                    FilterChip(
+                        selected = false,
+                        onClick = { vm.setAudioAuthPreset(90) },
+                        enabled = status.isConnected,
+                        label = { Text("90 天") }
+                    )
+                }
+                HorizontalDivider()
+                Text("兼容/调试入口", style = MaterialTheme.typography.labelLarge)
+                OutlinedTextField(appAuthValue, { appAuthValue = it }, label = { Text("手动 setapp value") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Button(onClick = { vm.authorizeApp(appAuthValue) }, enabled = status.isConnected && appAuthValue.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("手动发送 setapp") }
+                OutlinedTextField(authTimeValue, { authTimeValue = it }, label = { Text("手动 AuthTime value") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Button(onClick = { vm.setAuthTime(authTimeValue) }, enabled = status.isConnected && authTimeValue.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("手动发送 AuthTime") }
             }
         }
 
