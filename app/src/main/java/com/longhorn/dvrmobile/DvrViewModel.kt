@@ -46,6 +46,9 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
     private val _downloads = MutableStateFlow<List<DownloadTask>>(emptyList())
     val downloads: StateFlow<List<DownloadTask>> = _downloads.asStateFlow()
 
+    private val _advanced = MutableStateFlow(AdvancedDvrState())
+    val advanced: StateFlow<AdvancedDvrState> = _advanced.asStateFlow()
+
     init {
         repo.startDiscovery()
     }
@@ -61,7 +64,18 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
         _message.value = if (uri == null) "已清除下载目录" else "已设置下载目录"
     }
 
-    fun probe() = action("正在测试连接") { repo.probe() }
+    fun probe() {
+        viewModelScope.launch {
+            val probe = repo.probe()
+            if (probe.isFailure) {
+                _message.value = "连接测试：${probe.exceptionOrNull()?.message}"
+                return@launch
+            }
+            repo.initializeClient(BuildConfig.VERSION_CODE.toLong())
+            _message.value = "连接测试：成功"
+            refreshAdvanced()
+        }
+    }
     fun recordStart() = action("开始录像") { repo.startRecording() }
     fun recordStop() = action("停止录像") { repo.stopRecording() }
 
@@ -90,6 +104,144 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
 
     fun authorizeApp(value: String) = action("APP 授权") { repo.authorizeApp(value) }
     fun setAuthTime(value: String) = action("设置录音授权时效") { repo.setAuthTime(value) }
+
+    fun setAudioAuthPreset(days: Int) {
+        val value = when (days) {
+            360 -> "0"
+            180 -> "1"
+            90 -> "2"
+            else -> return
+        }
+        action("设置录音授权 ${days} 天") { repo.setAuthTime(value) }
+    }
+
+    fun refreshAdvanced() {
+        viewModelScope.launch {
+            _advanced.value = _advanced.value.copy(loading = true, error = null)
+            val ai = repo.aiActiveTest()
+            val roi = repo.getPeopleRoi()
+            _advanced.value = _advanced.value.copy(
+                loading = false,
+                aiActive = ai.getOrNull(),
+                peopleRoi = roi.getOrNull() ?: _advanced.value.peopleRoi,
+                lastRawResponse = when {
+                    ai.isFailure -> ai.exceptionOrNull()?.message
+                    roi.isFailure -> roi.exceptionOrNull()?.message
+                    else -> "高级能力探测完成"
+                },
+                error = null,
+            )
+        }
+    }
+
+    fun setAiEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            _message.value = if (enabled) "正在开启 AI，设备可能自动重启…" else "正在关闭 AI，设备可能自动重启…"
+            val r = repo.setAlgEnabled(enabled)
+            if (r.isSuccess) {
+                _advanced.value = _advanced.value.copy(aiEnabled = enabled)
+                _message.value = "AI 功能设置成功；原厂固件可能立即重启"
+            } else {
+                _message.value = "AI 功能设置失败：${r.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
+    fun setParkingMode(mode: ParkingMode) {
+        viewModelScope.launch {
+            val r = repo.setParkingMode(mode)
+            if (r.isSuccess) {
+                _advanced.value = _advanced.value.copy(parkingMode = mode)
+                _message.value = "驻车模式已设置为：${mode.label}"
+            } else {
+                _message.value = "驻车模式设置失败：${r.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
+    fun setParkingGSensor(level: Int) {
+        viewModelScope.launch {
+            val r = repo.setParkingGSensor(level)
+            if (r.isSuccess) {
+                _advanced.value = _advanced.value.copy(parkingGSensorLevel = level)
+                _message.value = "停车 G-sensor 已设置为档位 $level"
+            } else {
+                _message.value = "停车 G-sensor 设置失败：${r.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
+    fun loadPeopleRoi() {
+        viewModelScope.launch {
+            val r = repo.getPeopleRoi()
+            if (r.isSuccess) {
+                _advanced.value = _advanced.value.copy(peopleRoi = r.getOrThrow())
+                _message.value = "已读取人员检测区域"
+            } else {
+                _message.value = "读取 ROI 失败：${r.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
+    fun setPeopleRoi(roi: String) {
+        viewModelScope.launch {
+            val r = repo.setPeopleRoi(roi)
+            if (r.isSuccess) {
+                _advanced.value = _advanced.value.copy(peopleRoi = roi)
+                _message.value = "人员检测区域已更新"
+            } else {
+                _message.value = "ROI 设置失败：${r.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
+    fun setPeopleDetectDuration(value: Int) {
+        viewModelScope.launch {
+            val r = repo.setPeopleDetectDuration(value)
+            if (r.isSuccess) {
+                _advanced.value = _advanced.value.copy(peopleDetectDuration = value)
+                _message.value = "人员检测持续时间参数已设置"
+            } else {
+                _message.value = "人员检测持续时间设置失败：${r.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
+    fun setSigmaParkingMonitor(enabled: Boolean) {
+        viewModelScope.launch {
+            val r = repo.setSigmaParkingMonitor(enabled)
+            if (r.isSuccess) {
+                _advanced.value = _advanced.value.copy(sigmaParkingMonitor = enabled)
+                _message.value = "SigmaStar 停车监控已${if (enabled) "开启" else "关闭"}"
+            } else {
+                _message.value = "停车监控设置失败：${r.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
+    fun setSigmaGSensor(value: String) {
+        viewModelScope.launch {
+            val r = repo.setSigmaGSensor(value)
+            if (r.isSuccess) {
+                _advanced.value = _advanced.value.copy(sigmaGSensor = value)
+                _message.value = "行车 G-sensor 已设置为 $value"
+            } else {
+                _message.value = "行车 G-sensor 设置失败：${r.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
+    fun setSigmaPowerOnGSensor(value: String) {
+        viewModelScope.launch {
+            val r = repo.setSigmaPowerOnGSensor(value)
+            if (r.isSuccess) {
+                _advanced.value = _advanced.value.copy(sigmaPowerOnGSensor = value)
+                _message.value = "停车唤醒 G-sensor 已设置为 $value"
+            } else {
+                _message.value = "停车唤醒 G-sensor 设置失败：${r.exceptionOrNull()?.message}"
+            }
+        }
+    }
 
     fun delete(file: DvrMediaFile) {
         viewModelScope.launch {
