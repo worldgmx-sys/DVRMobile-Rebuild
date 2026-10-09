@@ -24,6 +24,7 @@ data class AdvancedDvrState(
     val sigmaGSensor: String? = null,
     val sigmaPowerOnGSensor: String? = null,
     val sigmaValues: Map<String, String> = emptyMap(),
+    val ppgAvailable: Boolean? = null,
     val supportedPpgCommands: Set<Int> = emptySet(),
     val roiReadable: Boolean? = null,
     val sentinelReadable: Boolean? = null,
@@ -55,6 +56,14 @@ object DvrResponseParser {
         // as the setting value when the response does not actually expose one.
         if ('<' in raw && '>' in raw) return null
         return firstInt(raw)
+    }
+
+    fun isPpgResponse(raw: String?, expectedCmd: Int? = null): Boolean {
+        if (raw.isNullOrBlank()) return false
+        if (!raw.contains("<Function", ignoreCase = true)) return false
+        if (!raw.contains("<Cmd>", ignoreCase = true)) return false
+        return expectedCmd == null ||
+            Regex("""<Cmd>\s*${expectedCmd}\s*</Cmd>""", RegexOption.IGNORE_CASE).containsMatchIn(raw)
     }
 
     fun commandNumbers(raw: String): Set<Int> =
