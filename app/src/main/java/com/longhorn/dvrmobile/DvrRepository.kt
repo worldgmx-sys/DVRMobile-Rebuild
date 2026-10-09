@@ -197,6 +197,22 @@ class DvrRepository(context: Context) {
             runCatching {
                 var next = current.copy(loading = true, error = null)
                 val notes = mutableListOf<String>()
+                val nativeDiagnostics = linkedMapOf<String, String>()
+                listOf(80, 8192).forEach { port ->
+                    val targets = listOf(
+                        "deviceattr" to DvrProtocol.nativeGetDeviceAttr(ip, port),
+                        "workstate" to DvrProtocol.nativeGetWorkState(ip, port),
+                        "workmode" to DvrProtocol.nativeGetWorkMode(ip, port),
+                        "commcap" to DvrProtocol.nativeGetCommParamCapability(ip, port),
+                        "gsr_parking" to DvrProtocol.nativeGetCommParam(ip, port, "GSR_PARKING"),
+                        "camcap" to DvrProtocol.nativeGetCamParamCapability(ip, port),
+                        "camparam" to DvrProtocol.nativeGetCamParam(ip, port),
+                    )
+                    targets.forEach { pair ->
+                        nativeDiagnostics[port.toString() + "/" + pair.first] = probeRaw(pair.second)
+                    }
+                }
+
 
                 // AStar / PPG: directly probe known getters first.
                 // Some production builds accept vendor 90xx commands but do not expose
@@ -296,11 +312,22 @@ class DvrRepository(context: Context) {
                 }
 
                 if (!astarDetected && sigmaProbe == null) {
-                    notes += "未识别到可读取的高级设置接口"
+                    val nativeHit = nativeDiagnostics.any { entry ->
+                        val value = entry.value
+                        !value.startsWith("HTTP 404") &&
+                        !value.startsWith("ERROR") &&
+                        !value.contains("Congratulations! The server is up", ignoreCase = true)
+                    }
+                    notes += if (nativeHit) {
+                        "PPG 未挂载；已发现原生 CGI 响应，请查看诊断"
+                    } else {
+                        "PPG 未挂载；80/8192 原生 CGI 暂未识别"
+                    }
                 }
 
                 next.copy(
                     loading = false,
+                    diagnosticResponses = next.diagnosticResponses + nativeDiagnostics.mapKeys { "native:" + it.key },
                     lastRawResponse = notes.joinToString("；"),
                     error = null,
                 )
@@ -605,6 +632,18 @@ class DvrRepository(context: Context) {
                 if (!response.isSuccessful) error("HTTP ${response.code}")
                 response.body?.string().orEmpty()
             }
+        }
+    }
+
+    private fun probeRaw(url: String): String {
+        val request = Request.Builder().url(url).get().build()
+        return runCatching {
+            http.newCall(request).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                "HTTP " + resp.code + "\n" + body.take(450)
+            }
+        }.getOrElse { err ->
+            "ERROR " + err.javaClass.simpleName + ": " + err.message
         }
     }
 
