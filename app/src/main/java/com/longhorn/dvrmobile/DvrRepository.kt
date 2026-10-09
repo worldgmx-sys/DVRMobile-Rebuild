@@ -227,14 +227,17 @@ class DvrRepository(context: Context) {
                 val ppgRaw = runCatching { get(DvrProtocol.ppgStatusAll(ip)) }.getOrNull()
                 val ppgMap = ppgRaw?.let(DvrResponseParser::ppgCommandMap).orEmpty()
 
-                val directAiActive = direct9023?.let(DvrResponseParser::ppgInt)
-                val directRoi = direct9098?.let(DvrResponseParser::normalizeRoi)
-                val directParkingMode = direct9137?.let(DvrResponseParser::ppgInt)
+                val valid9023 = DvrResponseParser.isPpgResponse(direct9023, 9023)
+                val valid9098 = DvrResponseParser.isPpgResponse(direct9098, 9098)
+                val valid9137 = DvrResponseParser.isPpgResponse(direct9137, 9137)
+                val directAiActive = direct9023?.takeIf { valid9023 }?.let(DvrResponseParser::ppgInt)
+                val directRoi = direct9098?.takeIf { valid9098 }?.let(DvrResponseParser::normalizeRoi)
+                val directParkingMode = direct9137?.takeIf { valid9137 }?.let(DvrResponseParser::ppgInt)
+                val ppgAvailable = valid9023 || valid9098 || valid9137 ||
+                    ppgMap.isNotEmpty() || supportedCommands.isNotEmpty()
 
                 val astarDetected =
-                    direct9023 != null ||
-                    direct9098 != null ||
-                    direct9137 != null ||
+                    ppgAvailable ||
                     supportedCommands.any { it in 9000..9999 } ||
                     ppgMap.keys.any { it in setOf(9096, 9099, 9106, 9137) }
 
@@ -263,6 +266,7 @@ class DvrRepository(context: Context) {
                         parkingGSensorLevel = parkingGSensor ?: next.parkingGSensorLevel,
                         peopleDetectDuration = duration ?: next.peopleDetectDuration,
                         peopleRoi = roi ?: next.peopleRoi,
+                        ppgAvailable = ppgAvailable,
                         supportedPpgCommands = supportedCommands,
                         roiReadable = if (supportedCommands.isEmpty()) roi != null else (9098 in supportedCommands && roi != null),
                         sentinelReadable = parkingModeValue != null,
@@ -327,6 +331,7 @@ class DvrRepository(context: Context) {
 
                 next.copy(
                     loading = false,
+                    ppgAvailable = if (next.ppgAvailable == true) true else false,
                     diagnosticResponses = next.diagnosticResponses + nativeDiagnostics.mapKeys { "native:" + it.key },
                     lastRawResponse = notes.joinToString("；"),
                     error = null,
