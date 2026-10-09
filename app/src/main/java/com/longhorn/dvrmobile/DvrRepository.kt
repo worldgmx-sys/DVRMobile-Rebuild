@@ -176,8 +176,14 @@ class DvrRepository(context: Context) {
         val ip = status.value.ip
             ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
         runCatching {
-            val raw = get(DvrProtocol.configGet(ip, property))
-            parseConfigValue(raw, property) ?: error("设备未返回可识别的 $property")
+            // Firmware GET() names differ from SET() names for these properties.
+            val getter = when (property) {
+                "VideoRes" -> "Videores"
+                "LoopingVideo" -> "VideoClipTime"
+                else -> property
+            }
+            val raw = get(DvrProtocol.configGet(ip, getter))
+            parseConfigValue(raw, getter) ?: error("设备未返回可识别的 $property (get=$getter)")
         }
     }
 
