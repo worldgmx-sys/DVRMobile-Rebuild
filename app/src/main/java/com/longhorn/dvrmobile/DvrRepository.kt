@@ -198,10 +198,15 @@ class DvrRepository(context: Context) {
                 var next = current.copy(loading = true, error = null)
                 val notes = mutableListOf<String>()
 
-                // AStar / PPG: cmd=3014 returns the command status table.
+                // AStar / PPG: discover actual supported commands first.
+                val supportedRaw = runCatching { get(DvrProtocol.ppgSupportedCommands(ip)) }.getOrNull()
+                val supportedCommands = supportedRaw?.let(DvrResponseParser::commandNumbers).orEmpty()
+
                 val ppgRaw = runCatching { get(DvrProtocol.ppgStatusAll(ip)) }.getOrNull()
                 val ppgMap = ppgRaw?.let(DvrResponseParser::ppgCommandMap).orEmpty()
-                val astarDetected = ppgMap.keys.any { it in setOf(9096, 9099, 9106, 9137) }
+                val astarDetected =
+                    supportedCommands.any { it in 9000..9999 } ||
+                    ppgMap.keys.any { it in setOf(9096, 9099, 9106, 9137) }
 
                 if (astarDetected) {
                     val aiEnabled = ppgMap[9096]?.let { (statusValue, value) ->
@@ -214,11 +219,13 @@ class DvrRepository(context: Context) {
                         return item.second?.toIntOrNull() ?: item.first
                     }
 
-                    val parkingMode = ParkingMode.fromValue(commandInt(9137))
+                    val parkingModeValue = commandInt(9137) ?: readPpgInt(ip, 9137)
+                    val parkingMode = ParkingMode.fromValue(parkingModeValue)
                     val parkingGSensor = commandInt(9106)?.takeIf { it in 0..3 }
                     val duration = commandInt(9099)?.takeIf { it in 0..120 }
                     val aiActive = aiActiveTest().getOrNull()
-                    val roi = getPeopleRoi().getOrNull()
+                    val roiResult = getPeopleRoi()
+                    val roi = roiResult.getOrNull()
 
                     next = next.copy(
                         aiActive = aiActive ?: next.aiActive,
@@ -227,8 +234,19 @@ class DvrRepository(context: Context) {
                         parkingGSensorLevel = parkingGSensor ?: next.parkingGSensorLevel,
                         peopleDetectDuration = duration ?: next.peopleDetectDuration,
                         peopleRoi = roi ?: next.peopleRoi,
+                        supportedPpgCommands = supportedCommands,
+                        roiReadable = if (supportedCommands.isEmpty()) roi != null else (9098 in supportedCommands && roi != null),
+                        sentinelReadable = parkingModeValue != null,
                     )
-                    notes += "AStar/PPG 设置已同步"
+                    notes += buildString {
+                        append("AStar/PPG 已同步")
+                        if (supportedCommands.isNotEmpty()) {
+                            append("；扩展CMD=")
+                            append(supportedCommands.sorted().filter { it >= 9000 }.joinToString(","))
+                        }
+                        if (roi == null) append("；ROI不可读")
+                        if (parkingModeValue == null) append("；Sentinel状态不可读")
+                    }
                 }
 
                 // SigmaStar: only enumerate the full property catalog after a successful probe,
