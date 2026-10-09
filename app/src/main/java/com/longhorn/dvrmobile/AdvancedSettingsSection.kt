@@ -28,9 +28,10 @@ fun AdvancedSettingsSection(
     var showAiConfirm by remember { mutableStateOf<Boolean?>(null) }
 
     val ppgKnown = advanced.supportedPpgCommands.isNotEmpty()
-    val sentinelSupported = !ppgKnown || 9137 in advanced.supportedPpgCommands
-    val roiWriteSupported = !ppgKnown || 9097 in advanced.supportedPpgCommands
-    val roiReadSupported = !ppgKnown || 9098 in advanced.supportedPpgCommands
+    val ppgAvailable = advanced.ppgAvailable != false
+    val sentinelSupported = ppgAvailable && (!ppgKnown || 9137 in advanced.supportedPpgCommands)
+    val roiWriteSupported = ppgAvailable && (!ppgKnown || 9097 in advanced.supportedPpgCommands)
+    val roiReadSupported = ppgAvailable && (!ppgKnown || 9098 in advanced.supportedPpgCommands)
 
     showAiConfirm?.let { target ->
         AlertDialog(
@@ -80,6 +81,11 @@ fun AdvancedSettingsSection(
                 }
             }
 
+            StatusPair("PPG 接口", when (advanced.ppgAvailable) {
+                true -> "可用"
+                false -> "未挂载到当前 Web 服务"
+                null -> "未知"
+            })
             StatusPair("AI 授权/激活", when (advanced.aiActive) {
                 true -> "已激活"
                 false -> "未激活"
