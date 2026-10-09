@@ -27,6 +27,7 @@ data class AdvancedDvrState(
     val supportedPpgCommands: Set<Int> = emptySet(),
     val roiReadable: Boolean? = null,
     val sentinelReadable: Boolean? = null,
+    val diagnosticResponses: Map<String, String> = emptyMap(),
     val lastRawResponse: String? = null,
     val error: String? = null,
 ) {
@@ -46,10 +47,15 @@ object DvrResponseParser {
     fun firstInt(raw: String): Int? =
         Regex("""-?\d+""").find(raw)?.value?.toIntOrNull()
 
-    fun ppgInt(raw: String): Int? =
-        xmlValue(raw)?.toIntOrNull()
-            ?: xmlStatus(raw)?.toIntOrNull()
-            ?: firstInt(raw)
+    fun ppgInt(raw: String): Int? {
+        xmlValue(raw)?.toIntOrNull()?.let { return it }
+        xmlStatus(raw)?.toIntOrNull()?.let { return it }
+
+        // Do not treat XML declaration version="1.0" or <Cmd>xxxx</Cmd>
+        // as the setting value when the response does not actually expose one.
+        if ('<' in raw && '>' in raw) return null
+        return firstInt(raw)
+    }
 
     fun commandNumbers(raw: String): Set<Int> =
         Regex("""(?<!\d)(\d{4})(?!\d)""")
