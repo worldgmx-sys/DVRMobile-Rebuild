@@ -65,7 +65,7 @@ class DvrRepository(context: Context) {
     }
 
     suspend fun setAlgEnabled(enabled: Boolean): Result<String> =
-        command { DvrProtocol.setAlgEnabled(it, enabled) }
+        ppgCommand(9096) { DvrProtocol.setAlgEnabled(it, enabled) }
 
     suspend fun setParkingMode(mode: ParkingMode): Result<String> = withContext(Dispatchers.IO) {
         val ip = status.value.ip
@@ -77,6 +77,7 @@ class DvrRepository(context: Context) {
             }
 
             val setRaw = get(DvrProtocol.setParkingModeAStar(ip, mode.value))
+            ensureCommandExecuted(setRaw, 9137)
             runCatching { get(DvrProtocol.ppgSaveSettings(ip)) }
             delay(250)
 
@@ -95,7 +96,7 @@ class DvrRepository(context: Context) {
 
     suspend fun setParkingGSensor(level: Int): Result<String> {
         require(level in 0..3) { "停车 G-sensor 档位必须为 0..3" }
-        return command { DvrProtocol.setParkingGSensorAStar(it, level) }
+        return ppgCommand(9106) { DvrProtocol.setParkingGSensorAStar(it, level) }
     }
 
     suspend fun getPeopleRoi(): Result<String> = withContext(Dispatchers.IO) {
@@ -126,6 +127,7 @@ class DvrRepository(context: Context) {
             }
 
             val setRaw = get(DvrProtocol.setPeopleRoi(ip, roi))
+            ensureCommandExecuted(setRaw, 9097)
             runCatching { get(DvrProtocol.ppgSaveSettings(ip)) }
             delay(250)
 
@@ -146,7 +148,7 @@ class DvrRepository(context: Context) {
 
     suspend fun setPeopleDetectDuration(value: Int): Result<String> {
         require(value in 0..120) { "人员检测持续时间参数必须为 0..120" }
-        return command { DvrProtocol.setPeopleDetectDuration(it, value) }
+        return ppgCommand(9099) { DvrProtocol.setPeopleDetectDuration(it, value) }
     }
 
     suspend fun setSigmaParkingMonitor(enabled: Boolean): Result<String> =
@@ -200,16 +202,17 @@ class DvrRepository(context: Context) {
                 val nativeDiagnostics = linkedMapOf<String, String>()
                 listOf(80, 8192).forEach { port ->
                     val targets = listOf(
-                        "deviceattr" to DvrProtocol.nativeGetDeviceAttr(ip, port),
-                        "workstate" to DvrProtocol.nativeGetWorkState(ip, port),
-                        "workmode" to DvrProtocol.nativeGetWorkMode(ip, port),
-                        "commcap" to DvrProtocol.nativeGetCommParamCapability(ip, port),
-                        "gsr_parking" to DvrProtocol.nativeGetCommParam(ip, port, "GSR_PARKING"),
-                        "camcap" to DvrProtocol.nativeGetCamParamCapability(ip, port),
-                        "camparam" to DvrProtocol.nativeGetCamParam(ip, port),
+                        Triple("deviceattr", "getdeviceattr.cgi", null),
+                        Triple("workstate", "getworkstate.cgi", null),
+                        Triple("workmode", "getworkmodecmd.cgi", null),
+                        Triple("commcap_gsr", "getcommparamcapability.cgi", "type=GSR_PARKING"),
+                        Triple("gsr_parking", "getcommparam.cgi", "type=GSR_PARKING"),
                     )
-                    targets.forEach { pair ->
-                        nativeDiagnostics[port.toString() + "/" + pair.first] = probeRaw(pair.second)
+                    targets.forEach { (label, name, query) ->
+                        DvrProtocol.nativeCgiCandidates(ip, port, name, query).forEachIndexed { index, url ->
+                            val suffix = if (index == 0) "root" else "cgi-bin"
+                            nativeDiagnostics["$port/$label/$suffix"] = probeRaw(url)
+                        }
                     }
                 }
 
@@ -666,6 +669,30 @@ class DvrRepository(context: Context) {
 
         val direct = runCatching { get(DvrProtocol.ppgRead(ip, cmd)) }.getOrNull() ?: return null
         return DvrResponseParser.ppgInt(direct)
+    }
+
+    private suspend fun ppgCommand(
+        cmd: Int,
+        urlForIp: (String) -> String,
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val ip = status.value.ip
+            ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
+        runCatching {
+            val raw = get(urlForIp(ip))
+            ensureCommandExecuted(raw, cmd)
+            raw
+        }
+    }
+
+    private fun ensureCommandExecuted(raw: String, cmd: Int) {
+        val normalized = raw.lowercase()
+        if (
+            normalized.contains("<title>home page</title>") &&
+            normalized.contains("congratulations") &&
+            normalized.contains("server is up")
+        ) {
+            error("cmd=$cmd 未进入 PPG 处理器：服务器返回默认 Home Page")
+        }
     }
 
     private suspend fun command(urlForIp: (String) -> String): Result<String> = withContext(Dispatchers.IO) {
