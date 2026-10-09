@@ -60,6 +60,7 @@ class DvrRepository(context: Context) {
             ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
         runCatching {
             val raw = get(DvrProtocol.aiActiveTest(ip))
+            check(DvrResponseParser.isPpgResponse(raw, 9023)) { "9023 未返回有效 PPG 命令响应" }
             DvrResponseParser.ppgInt(raw) == 1
         }
     }
@@ -76,9 +77,10 @@ class DvrRepository(context: Context) {
                 error("设备未声明支持 PPG 9137 停车模式")
             }
 
+            check(isPpgReachable(ip)) { "PPG 命令处理器未确认，禁止写入 Sentinel" }
             val setRaw = get(DvrProtocol.setParkingModeAStar(ip, mode.value))
             ensureCommandExecuted(setRaw, 9137)
-            runCatching { get(DvrProtocol.ppgSaveSettings(ip)) }
+            // Do not blindly send cmd=3021 until the PPG endpoint is verified.
             delay(250)
 
             val readBack = readPpgInt(ip, 9137)
@@ -126,6 +128,7 @@ class DvrRepository(context: Context) {
                 error("设备未声明支持 PPG 9097 ROI 设置")
             }
 
+            check(isPpgReachable(ip)) { "PPG 命令处理器未确认，禁止写入 ROI" }
             val setRaw = get(DvrProtocol.setPeopleRoi(ip, roi))
             ensureCommandExecuted(setRaw, 9097)
             runCatching { get(DvrProtocol.ppgSaveSettings(ip)) }
@@ -200,22 +203,19 @@ class DvrRepository(context: Context) {
                 var next = current.copy(loading = true, error = null)
                 val notes = mutableListOf<String>()
                 val nativeDiagnostics = linkedMapOf<String, String>()
-                listOf(80, 8192).forEach { port ->
-                    val targets = listOf(
-                        Triple("deviceattr", "getdeviceattr.cgi", null),
-                        Triple("workstate", "getworkstate.cgi", null),
-                        Triple("workmode", "getworkmodecmd.cgi", null),
-                        Triple("commcap_gsr", "getcommparamcapability.cgi", "type=GSR_PARKING"),
-                        Triple("gsr_parking", "getcommparam.cgi", "type=GSR_PARKING"),
-                    )
-                    targets.forEach { (label, name, query) ->
-                        DvrProtocol.nativeCgiCandidates(ip, port, name, query).forEachIndexed { index, url ->
-                            val suffix = if (index == 0) "root" else "cgi-bin"
-                            nativeDiagnostics["$port/$label/$suffix"] = probeRaw(url)
-                        }
-                    }
+                // Read-only targeted probes: avoid 20 sequential timeout-prone calls.
+                val endpoints = listOf(
+                    Triple(80, "deviceattr", "getdeviceattr.cgi"),
+                    Triple(80, "workstate", "getworkstate.cgi"),
+                    Triple(80, "workmode", "getworkmodecmd.cgi"),
+                    Triple(8192, "deviceattr", "getdeviceattr.cgi"),
+                    Triple(8192, "workstate", "getworkstate.cgi"),
+                    Triple(8192, "workmode", "getworkmodecmd.cgi")
+                )
+                endpoints.forEach { (port, label, name) ->
+                    val url = DvrProtocol.nativeCgi(ip, port, name)
+                    nativeDiagnostics["$port/$label/root"] = probeRaw(url)
                 }
-
 
                 // AStar / PPG: directly probe known getters first.
                 // Some production builds accept vendor 90xx commands but do not expose
@@ -225,10 +225,10 @@ class DvrRepository(context: Context) {
                 val direct9137 = runCatching { get(DvrProtocol.ppgRead(ip, 9137)) }.getOrNull()
 
                 val supportedRaw = runCatching { get(DvrProtocol.ppgSupportedCommands(ip)) }.getOrNull()
-                val supportedCommands = supportedRaw?.let(DvrResponseParser::commandNumbers).orEmpty()
+                val supportedCommands = supportedRaw?.takeIf { DvrResponseParser.isPpgResponse(it) }?.let(DvrResponseParser::commandNumbers).orEmpty()
 
                 val ppgRaw = runCatching { get(DvrProtocol.ppgStatusAll(ip)) }.getOrNull()
-                val ppgMap = ppgRaw?.let(DvrResponseParser::ppgCommandMap).orEmpty()
+                val ppgMap = ppgRaw?.takeIf { DvrResponseParser.isPpgResponse(it) }?.let(DvrResponseParser::ppgCommandMap).orEmpty()
 
                 val valid9023 = DvrResponseParser.isPpgResponse(direct9023, 9023)
                 val valid9098 = DvrResponseParser.isPpgResponse(direct9098, 9098)
@@ -655,20 +655,25 @@ class DvrRepository(context: Context) {
         }
     }
 
+    private fun isPpgReachable(ip: String): Boolean {
+        val raw = runCatching { get(DvrProtocol.aiActiveTest(ip)) }.getOrNull()
+        return DvrResponseParser.isPpgResponse(raw, 9023)
+    }
+
     private fun getSupportedPpgCommands(ip: String): Set<Int> {
         val raw = runCatching { get(DvrProtocol.ppgSupportedCommands(ip)) }.getOrNull() ?: return emptySet()
-        return DvrResponseParser.commandNumbers(raw)
+        return if (DvrResponseParser.isPpgResponse(raw)) DvrResponseParser.commandNumbers(raw) else emptySet()
     }
 
     private fun readPpgInt(ip: String, cmd: Int): Int? {
         val all = runCatching { get(DvrProtocol.ppgStatusAll(ip)) }.getOrNull()
-        val fromAll = all?.let(DvrResponseParser::ppgCommandMap)?.get(cmd)?.let { (statusValue, value) ->
+        val fromAll = all?.takeIf { DvrResponseParser.isPpgResponse(it) }?.let(DvrResponseParser::ppgCommandMap)?.get(cmd)?.let { (statusValue, value) ->
             value?.toIntOrNull() ?: statusValue
         }
         if (fromAll != null) return fromAll
 
         val direct = runCatching { get(DvrProtocol.ppgRead(ip, cmd)) }.getOrNull() ?: return null
-        return DvrResponseParser.ppgInt(direct)
+        return if (DvrResponseParser.isPpgResponse(direct, cmd)) DvrResponseParser.ppgInt(direct) else null
     }
 
     private suspend fun ppgCommand(
@@ -678,6 +683,7 @@ class DvrRepository(context: Context) {
         val ip = status.value.ip
             ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
         runCatching {
+            check(isPpgReachable(ip)) { "PPG 命令处理器未确认，禁止写入 cmd=$cmd" }
             val raw = get(urlForIp(ip))
             ensureCommandExecuted(raw, cmd)
             raw
@@ -714,6 +720,7 @@ class DvrRepository(context: Context) {
         if (text.isBlank()) return null
         val lower = text.lowercase()
         if ("unsupported" in lower || "not support" in lower || "unknown property" in lower) return null
+        if ("<html" in lower || "<!doctype html" in lower || "congratulations!" in lower) return null
 
         DvrResponseParser.xmlValue(text)?.takeIf { it.isNotBlank() }?.let { return it }
 
