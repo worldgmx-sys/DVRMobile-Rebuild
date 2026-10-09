@@ -47,7 +47,11 @@ object DvrProtocol {
         return "${base(ip)}/?${params.joinToString("&")}"
     }
 
+    fun ppgSupportedCommands(ip: String) = ppg(ip, 3002)
     fun ppgStatusAll(ip: String) = ppg(ip, 3014)
+    fun ppgSaveSettings(ip: String) = ppg(ip, 3021)
+    fun ppgOptions(ip: String) = ppg(ip, 3031)
+    fun ppgRead(ip: String, cmd: Int) = ppg(ip, cmd)
     fun aiActiveTest(ip: String) = ppg(ip, 9023)
     fun setAlgEnabled(ip: String, enabled: Boolean) = ppg(ip, 9096, par = if (enabled) "1" else "0")
     fun setPeopleRoi(ip: String, roi: String) = ppg(ip, 9097, str = roi)
