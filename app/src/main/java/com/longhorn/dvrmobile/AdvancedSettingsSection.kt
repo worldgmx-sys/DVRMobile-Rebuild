@@ -27,6 +27,11 @@ fun AdvancedSettingsSection(
     }
     var showAiConfirm by remember { mutableStateOf<Boolean?>(null) }
 
+    val ppgKnown = advanced.supportedPpgCommands.isNotEmpty()
+    val sentinelSupported = !ppgKnown || 9137 in advanced.supportedPpgCommands
+    val roiWriteSupported = !ppgKnown || 9097 in advanced.supportedPpgCommands
+    val roiReadSupported = !ppgKnown || 9098 in advanced.supportedPpgCommands
+
     showAiConfirm?.let { target ->
         AlertDialog(
             onDismissRequest = { showAiConfirm = null },
@@ -116,14 +121,26 @@ fun AdvancedSettingsSection(
                     FilterChip(
                         selected = advanced.parkingMode == mode,
                         onClick = { vm.setParkingMode(mode) },
-                        enabled = status.isConnected,
-                        label = { Text(mode.label) }
+                        enabled = status.isConnected && (mode != ParkingMode.SENTINEL || sentinelSupported),
+                        label = {
+                            Text(
+                                if (mode == ParkingMode.SENTINEL && !sentinelSupported) {
+                                    "${mode.label}（不支持）"
+                                } else {
+                                    mode.label
+                                }
+                            )
+                        }
                     )
                 }
             }
 
             Text(
-                "Sentinel 对应 cmd=9137&par=4。真正进入驻车状态仍由车辆 ACC/CAN/MCU 电源状态决定。",
+                when {
+                    !sentinelSupported -> "设备 3002 能力列表未声明 cmd=9137，因此当前固件不开放 Sentinel 停车模式设置。"
+                    advanced.sentinelReadable == false -> "设备接受 PPG，但当前无法读回 9137 状态；设置后会执行 3021 保存并尝试直接读回验证。"
+                    else -> "Sentinel 对应 cmd=9137&par=4；设置后自动执行 cmd=3021 保存，再读回验证。真正进入驻车状态仍由车辆 ACC/CAN/MCU 决定。"
+                },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -144,7 +161,11 @@ fun AdvancedSettingsSection(
             HorizontalDivider()
             Text("人员检测区域 ROI", fontWeight = FontWeight.SemiBold)
             Text(
-                "使用 1920×1080 像素坐标，支持 4～6 个点。默认全画面：0,1080;0,0;1920,0;1920,1080",
+                when {
+                    !roiWriteSupported && !roiReadSupported -> "设备能力列表未声明 9097/9098，当前固件没有开放 ROI Web 接口。"
+                    roiWriteSupported && !roiReadSupported -> "设备声明 9097 写入，但未声明 9098 读取：可尝试写入，但无法通过 Web 读回验证。"
+                    else -> "使用 1920×1080 像素坐标，支持 4～6 个点。默认全画面：0,1080;0,0;1920,0;1920,1080"
+                },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -158,14 +179,14 @@ fun AdvancedSettingsSection(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(
                     onClick = { vm.loadPeopleRoi() },
-                    enabled = status.isConnected,
+                    enabled = status.isConnected && roiReadSupported,
                     modifier = Modifier.weight(1f)
-                ) { Text("读取 ROI") }
+                ) { Text(if (roiReadSupported) "读取 ROI" else "ROI 不可读") }
                 Button(
                     onClick = { vm.setPeopleRoi(roiText.trim()) },
-                    enabled = status.isConnected && DvrResponseParser.isValidRoi(roiText.trim()),
+                    enabled = status.isConnected && roiWriteSupported && DvrResponseParser.isValidRoi(roiText.trim()),
                     modifier = Modifier.weight(1f)
-                ) { Text("写入 ROI") }
+                ) { Text(if (roiWriteSupported) "写入 ROI" else "ROI 不可写") }
             }
 
             HorizontalDivider()
