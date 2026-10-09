@@ -691,13 +691,13 @@ class DvrRepository(context: Context) {
     }
 
     private fun ensureCommandExecuted(raw: String, cmd: Int) {
-        val normalized = raw.lowercase()
-        if (
-            normalized.contains("<title>home page</title>") &&
-            normalized.contains("congratulations") &&
-            normalized.contains("server is up")
-        ) {
-            error("cmd=$cmd 未进入 PPG 处理器：服务器返回默认 Home Page")
+        check(DvrResponseParser.isPpgResponse(raw, cmd)) {
+            "cmd=$cmd 未返回匹配的 PPG/XML 结果，设置未验证；响应：" +
+                raw.replace(Regex("\\s+"), " ").take(160)
+        }
+        val statusCode = DvrResponseParser.xmlStatus(raw)?.toIntOrNull()
+        check(statusCode == null || statusCode == 0) {
+            "cmd=$cmd 返回失败状态 $statusCode"
         }
     }
 
