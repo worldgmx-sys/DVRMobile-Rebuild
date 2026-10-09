@@ -24,6 +24,9 @@ data class AdvancedDvrState(
     val sigmaGSensor: String? = null,
     val sigmaPowerOnGSensor: String? = null,
     val sigmaValues: Map<String, String> = emptyMap(),
+    val supportedPpgCommands: Set<Int> = emptySet(),
+    val roiReadable: Boolean? = null,
+    val sentinelReadable: Boolean? = null,
     val lastRawResponse: String? = null,
     val error: String? = null,
 ) {
@@ -47,6 +50,13 @@ object DvrResponseParser {
         xmlValue(raw)?.toIntOrNull()
             ?: xmlStatus(raw)?.toIntOrNull()
             ?: firstInt(raw)
+
+    fun commandNumbers(raw: String): Set<Int> =
+        Regex("""(?<!\d)(\d{4})(?!\d)""")
+            .findAll(raw)
+            .mapNotNull { it.groupValues[1].toIntOrNull() }
+            .filter { it in 1000..9999 }
+            .toSet()
 
     fun ppgCommandMap(raw: String): Map<Int, Pair<Int?, String?>> {
         val result = linkedMapOf<Int, Pair<Int?, String?>>()
