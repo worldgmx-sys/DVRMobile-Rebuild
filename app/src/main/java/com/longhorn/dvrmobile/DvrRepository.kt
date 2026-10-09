@@ -198,13 +198,27 @@ class DvrRepository(context: Context) {
                 var next = current.copy(loading = true, error = null)
                 val notes = mutableListOf<String>()
 
-                // AStar / PPG: discover actual supported commands first.
+                // AStar / PPG: directly probe known getters first.
+                // Some production builds accept vendor 90xx commands but do not expose
+                // the generic 3002/3014 capability/status tables.
+                val direct9023 = runCatching { get(DvrProtocol.aiActiveTest(ip)) }.getOrNull()
+                val direct9098 = runCatching { get(DvrProtocol.getPeopleRoi(ip)) }.getOrNull()
+                val direct9137 = runCatching { get(DvrProtocol.ppgRead(ip, 9137)) }.getOrNull()
+
                 val supportedRaw = runCatching { get(DvrProtocol.ppgSupportedCommands(ip)) }.getOrNull()
                 val supportedCommands = supportedRaw?.let(DvrResponseParser::commandNumbers).orEmpty()
 
                 val ppgRaw = runCatching { get(DvrProtocol.ppgStatusAll(ip)) }.getOrNull()
                 val ppgMap = ppgRaw?.let(DvrResponseParser::ppgCommandMap).orEmpty()
+
+                val directAiActive = direct9023?.let(DvrResponseParser::ppgInt)
+                val directRoi = direct9098?.let(DvrResponseParser::normalizeRoi)
+                val directParkingMode = direct9137?.let(DvrResponseParser::ppgInt)
+
                 val astarDetected =
+                    direct9023 != null ||
+                    direct9098 != null ||
+                    direct9137 != null ||
                     supportedCommands.any { it in 9000..9999 } ||
                     ppgMap.keys.any { it in setOf(9096, 9099, 9106, 9137) }
 
@@ -219,13 +233,12 @@ class DvrRepository(context: Context) {
                         return item.second?.toIntOrNull() ?: item.first
                     }
 
-                    val parkingModeValue = commandInt(9137) ?: readPpgInt(ip, 9137)
+                    val parkingModeValue = commandInt(9137) ?: directParkingMode ?: readPpgInt(ip, 9137)
                     val parkingMode = ParkingMode.fromValue(parkingModeValue)
                     val parkingGSensor = commandInt(9106)?.takeIf { it in 0..3 }
                     val duration = commandInt(9099)?.takeIf { it in 0..120 }
-                    val aiActive = aiActiveTest().getOrNull()
-                    val roiResult = getPeopleRoi()
-                    val roi = roiResult.getOrNull()
+                    val aiActive = directAiActive?.let { it == 1 } ?: aiActiveTest().getOrNull()
+                    val roi = directRoi ?: getPeopleRoi().getOrNull()
 
                     next = next.copy(
                         aiActive = aiActive ?: next.aiActive,
@@ -237,6 +250,13 @@ class DvrRepository(context: Context) {
                         supportedPpgCommands = supportedCommands,
                         roiReadable = if (supportedCommands.isEmpty()) roi != null else (9098 in supportedCommands && roi != null),
                         sentinelReadable = parkingModeValue != null,
+                        diagnosticResponses = buildMap {
+                            direct9023?.let { put("9023", it.take(500)) }
+                            direct9098?.let { put("9098", it.take(500)) }
+                            direct9137?.let { put("9137", it.take(500)) }
+                            supportedRaw?.let { put("3002", it.take(500)) }
+                            ppgRaw?.let { put("3014", it.take(500)) }
+                        },
                     )
                     notes += buildString {
                         append("AStar/PPG 已同步")
@@ -246,6 +266,7 @@ class DvrRepository(context: Context) {
                         }
                         if (roi == null) append("；ROI不可读")
                         if (parkingModeValue == null) append("；Sentinel状态不可读")
+                        if (supportedCommands.isEmpty()) append("；3002未提供能力列表，已改用直接探测")
                     }
                 }
 
