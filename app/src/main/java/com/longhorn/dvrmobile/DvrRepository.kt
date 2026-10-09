@@ -729,6 +729,9 @@ class DvrRepository(context: Context) {
     private fun parseConfigValue(raw: String, property: String): String? {
         val text = raw.trim()
         if (text.isBlank()) return null
+        // Some OEM GET shell branches accidentally echo the nvconf command
+        // rather than executing it. Such text is NOT a live setting value.
+        if (Regex("""(?i)(?:^|[=:\\s])nvconf\\s+get\\s+\\d+\\s+""").containsMatchIn(text)) return null
         val lower = text.lowercase()
         if ("unsupported" in lower || "not support" in lower || "unknown property" in lower) return null
         if ("<html" in lower || "<!doctype html" in lower || "congratulations!" in lower) return null
