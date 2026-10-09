@@ -67,8 +67,31 @@ class DvrRepository(context: Context) {
     suspend fun setAlgEnabled(enabled: Boolean): Result<String> =
         command { DvrProtocol.setAlgEnabled(it, enabled) }
 
-    suspend fun setParkingMode(mode: ParkingMode): Result<String> =
-        command { DvrProtocol.setParkingModeAStar(it, mode.value) }
+    suspend fun setParkingMode(mode: ParkingMode): Result<String> = withContext(Dispatchers.IO) {
+        val ip = status.value.ip
+            ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
+        runCatching {
+            val supported = getSupportedPpgCommands(ip)
+            if (supported.isNotEmpty() && 9137 !in supported) {
+                error("设备未声明支持 PPG 9137 停车模式")
+            }
+
+            val setRaw = get(DvrProtocol.setParkingModeAStar(ip, mode.value))
+            runCatching { get(DvrProtocol.ppgSaveSettings(ip)) }
+            delay(250)
+
+            val readBack = readPpgInt(ip, 9137)
+            if (readBack != null && readBack != mode.value) {
+                error("停车模式写入后读回为 $readBack，期望 ${mode.value}")
+            }
+
+            if (readBack == null) {
+                "$setRaw\n[warning] 设置命令已发送，但设备没有提供 9137 可读状态"
+            } else {
+                "$setRaw\n[verified] 9137=$readBack"
+            }
+        }
+    }
 
     suspend fun setParkingGSensor(level: Int): Result<String> {
         require(level in 0..3) { "停车 G-sensor 档位必须为 0..3" }
@@ -514,6 +537,22 @@ class DvrRepository(context: Context) {
                 response.body?.string().orEmpty()
             }
         }
+    }
+
+    private fun getSupportedPpgCommands(ip: String): Set<Int> {
+        val raw = runCatching { get(DvrProtocol.ppgSupportedCommands(ip)) }.getOrNull() ?: return emptySet()
+        return DvrResponseParser.commandNumbers(raw)
+    }
+
+    private fun readPpgInt(ip: String, cmd: Int): Int? {
+        val all = runCatching { get(DvrProtocol.ppgStatusAll(ip)) }.getOrNull()
+        val fromAll = all?.let(DvrResponseParser::ppgCommandMap)?.get(cmd)?.let { (statusValue, value) ->
+            value?.toIntOrNull() ?: statusValue
+        }
+        if (fromAll != null) return fromAll
+
+        val direct = runCatching { get(DvrProtocol.ppgRead(ip, cmd)) }.getOrNull() ?: return null
+        return DvrResponseParser.ppgInt(direct)
     }
 
     private suspend fun command(urlForIp: (String) -> String): Result<String> = withContext(Dispatchers.IO) {
