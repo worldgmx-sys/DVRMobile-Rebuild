@@ -33,6 +33,12 @@ object DvrProtocol {
     fun nativeGetCamParam(ip: String, port: Int, type: String? = null) =
         nativeCgi(ip, port, "getcamparam.cgi", type?.let { "type=" + encode(it) })
 
+    fun nativeCgiCandidates(ip: String, port: Int, name: String, query: String? = null): List<String> =
+        listOf(
+            nativeCgi(ip, port, name, query),
+            nativeCgi(ip, port, "cgi-bin/$name", query),
+        )
+
     fun rtsp(ip: String) = "rtsp://$ip/liveRTSP/av0"
 
     fun getDvr(ip: String) =
