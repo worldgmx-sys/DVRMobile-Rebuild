@@ -102,16 +102,46 @@ class DvrRepository(context: Context) {
         val ip = status.value.ip
             ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
         runCatching {
+            val supported = getSupportedPpgCommands(ip)
+            if (supported.isNotEmpty() && 9098 !in supported) {
+                error("设备未声明支持 PPG 9098 ROI 读取")
+            }
             val raw = get(DvrProtocol.getPeopleRoi(ip))
-            DvrResponseParser.normalizeRoi(raw) ?: error("设备未返回可识别的 ROI")
+            DvrResponseParser.normalizeRoi(raw)
+                ?: error("9098 返回无法解析为 ROI：${raw.take(240)}")
         }
     }
 
-    suspend fun setPeopleRoi(roi: String): Result<String> {
+    suspend fun setPeopleRoi(roi: String): Result<String> = withContext(Dispatchers.IO) {
         require(DvrResponseParser.isValidRoi(roi)) {
             "ROI 需为 4~6 个 1920×1080 像素坐标点，例如 0,1080;0,0;1920,0;1920,1080"
         }
-        return command { DvrProtocol.setPeopleRoi(it, roi) }
+        val ip = status.value.ip
+            ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
+
+        runCatching {
+            val supported = getSupportedPpgCommands(ip)
+            if (supported.isNotEmpty() && 9097 !in supported) {
+                error("设备未声明支持 PPG 9097 ROI 设置")
+            }
+
+            val setRaw = get(DvrProtocol.setPeopleRoi(ip, roi))
+            runCatching { get(DvrProtocol.ppgSaveSettings(ip)) }
+            delay(250)
+
+            if (supported.isEmpty() || 9098 in supported) {
+                val readRaw = runCatching { get(DvrProtocol.getPeopleRoi(ip)) }.getOrNull()
+                val readBack = readRaw?.let(DvrResponseParser::normalizeRoi)
+                if (readBack != null && readBack != roi) {
+                    error("ROI 写入后读回不一致：$readBack")
+                }
+                if (readBack == null) {
+                    return@runCatching "$setRaw\n[warning] ROI 写入命令已发送，但设备无法读回验证"
+                }
+            }
+
+            "$setRaw\n[verified] ROI=$roi"
+        }
     }
 
     suspend fun setPeopleDetectDuration(value: Int): Result<String> {
