@@ -4,6 +4,35 @@ import java.net.URLEncoder
 
 object DvrProtocol {
     fun base(ip: String) = "http://$ip"
+    fun baseOnPort(ip: String, port: Int) =
+        if (port == 80) "http://" + ip else "http://" + ip + ":" + port
+
+    fun nativeCgi(ip: String, port: Int, path: String, query: String? = null): String {
+        val normalized = if (path.startsWith("/")) path else "/" + path
+        return baseOnPort(ip, port) + normalized + if (query.isNullOrBlank()) "" else "?" + query
+    }
+
+    fun nativeGetDeviceAttr(ip: String, port: Int) =
+        nativeCgi(ip, port, "getdeviceattr.cgi")
+
+    fun nativeGetWorkState(ip: String, port: Int) =
+        nativeCgi(ip, port, "getworkstate.cgi")
+
+    fun nativeGetWorkMode(ip: String, port: Int) =
+        nativeCgi(ip, port, "getworkmodecmd.cgi")
+
+    fun nativeGetCommParamCapability(ip: String, port: Int, type: String? = null) =
+        nativeCgi(ip, port, "getcommparamcapability.cgi", type?.let { "type=" + encode(it) })
+
+    fun nativeGetCommParam(ip: String, port: Int, type: String) =
+        nativeCgi(ip, port, "getcommparam.cgi", "type=" + encode(type))
+
+    fun nativeGetCamParamCapability(ip: String, port: Int, type: String? = null) =
+        nativeCgi(ip, port, "getcamparamcapability.cgi", type?.let { "type=" + encode(it) })
+
+    fun nativeGetCamParam(ip: String, port: Int, type: String? = null) =
+        nativeCgi(ip, port, "getcamparam.cgi", type?.let { "type=" + encode(it) })
+
     fun rtsp(ip: String) = "rtsp://$ip/liveRTSP/av0"
 
     fun getDvr(ip: String) =
