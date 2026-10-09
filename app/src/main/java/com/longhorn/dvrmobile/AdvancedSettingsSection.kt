@@ -267,6 +267,18 @@ fun AdvancedSettingsSection(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
+
+            if (advanced.diagnosticResponses.isNotEmpty()) {
+                HorizontalDivider()
+                Text("AStar 原始响应诊断", style = MaterialTheme.typography.labelLarge)
+                advanced.diagnosticResponses.toSortedMap().forEach { (cmd, raw) ->
+                    Text(
+                        "cmd=$cmd\n$raw",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
         }
     }
 }
