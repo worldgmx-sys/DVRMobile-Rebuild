@@ -200,7 +200,7 @@ class DvrRepository(context: Context) {
                 ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
 
             runCatching {
-                var next = current.copy(loading = true, error = null)
+                var next = current.copy(loading = true, error = null, ppgAvailable = false, aiActive = null, aiEnabled = null, parkingMode = null, parkingGSensorLevel = null, roiReadable = null, sentinelReadable = null, supportedPpgCommands = emptySet(), diagnosticResponses = emptyMap())
                 val notes = mutableListOf<String>()
                 val nativeDiagnostics = linkedMapOf<String, String>()
                 // Read-only targeted probes: avoid 20 sequential timeout-prone calls.
@@ -213,8 +213,13 @@ class DvrRepository(context: Context) {
                     Triple(8192, "workmode", "getworkmodecmd.cgi")
                 )
                 endpoints.forEach { (port, label, name) ->
-                    val url = DvrProtocol.nativeCgi(ip, port, name)
-                    nativeDiagnostics["$port/$label/root"] = probeRaw(url)
+                    val root = DvrProtocol.nativeCgi(ip, port, name)
+                    nativeDiagnostics["$port/$label/root"] = probeRaw(root)
+                    // Check CGI directory only where an HTTP server is reachable.
+                    if (port == 80) {
+                        val cgi = DvrProtocol.nativeCgi(ip, port, "cgi-bin/$name")
+                        nativeDiagnostics["$port/$label/cgi-bin"] = probeRaw(cgi)
+                    }
                 }
 
                 // AStar / PPG: directly probe known getters first.
