@@ -497,7 +497,7 @@ private fun SettingsScreen(
             title = { Text("恢复记录仪设置？") },
             text = {
                 Text(
-                    "恢复会覆盖备份中包含的设置。AI 总开关变化可能触发 DVR 自动重启；请保持车辆供电稳定，不要在恢复过程中断电。"
+                    "恢复会逐项写入备份中可读取的 SigmaStar 设置。部分设置可能影响录像，请保持车辆供电稳定，过程中不要断电。"
                 )
             },
             confirmButton = {
