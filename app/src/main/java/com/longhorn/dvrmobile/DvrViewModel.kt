@@ -209,8 +209,7 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
             val backup = backupResult.getOrThrow()
             val writeResult = repo.writeSettingsBackup(uriString, backup)
             _message.value = if (writeResult.isSuccess) {
-                "设置备份完成：已采集 ${backup.sigma.size} 项 SigmaStar 参数" +
-                    if (backup.peopleRoi != null) "，包含 Sentinel ROI" else ""
+                "设置备份完成：已采集 ${backup.sigma.size} 项 SigmaStar 参数"
             } else {
                 "备份文件写入失败：${writeResult.exceptionOrNull()?.message}"
             }
@@ -243,11 +242,6 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
                 val report = restore.getOrThrow()
                 _message.value = report.summary
                 _advanced.value = _advanced.value.copy(
-                    aiEnabled = backup.aiEnabled ?: _advanced.value.aiEnabled,
-                    parkingMode = ParkingMode.fromValue(backup.parkingMode) ?: _advanced.value.parkingMode,
-                    parkingGSensorLevel = backup.parkingGSensor ?: _advanced.value.parkingGSensorLevel,
-                    peopleRoi = backup.peopleRoi ?: _advanced.value.peopleRoi,
-                    peopleDetectDuration = backup.peopleDetectDuration ?: _advanced.value.peopleDetectDuration,
                     sigmaParkingMonitor = backup.sigma["ParkingMonitor"]?.let {
                         it.equals("ENABLE", true) || it.equals("ON", true) || it == "1"
                     } ?: _advanced.value.sigmaParkingMonitor,
