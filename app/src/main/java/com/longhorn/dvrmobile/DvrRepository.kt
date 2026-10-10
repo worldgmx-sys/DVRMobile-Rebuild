@@ -137,10 +137,6 @@ class DvrRepository(context: Context) {
                     },
                     sigmaGSensor = sigma["GSensor"],
                     sigmaPowerOnGSensor = null,
-                    aiActive = null, aiEnabled = null, parkingMode = null,
-                    ppgAvailable = false, supportedPpgCommands = emptySet(),
-                    roiReadable = false, sentinelReadable = false,
-                    diagnosticResponses = emptyMap(),
                     lastRawResponse = "SigmaStar S38：读取到 ${sigma.size} 项可解析的设置；其他字段未验证，未执行 AStar 探测"
                 )
             }
