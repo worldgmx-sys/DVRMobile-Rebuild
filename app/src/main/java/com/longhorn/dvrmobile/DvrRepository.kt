@@ -106,6 +106,31 @@ class DvrRepository(context: Context) {
             "Net.WIFI_STA.AP.Switch"
         )
         require(property in allowed) { "不允许的 SigmaStar 参数：$property" }
+        val blocked = setOf("setbitrate", "AE", "RecStamp", "DateTimeFormat")
+        require(property !in blocked) { "$property 存在未解决的范围/配置冲突，暂不允许写入" }
+        val validatedEnums = mapOf(
+            "LoopingVideo" to setOf("1MIN", "2MIN", "3MIN", "5MIN", "10MIN", "15MIN"),
+            "VideoQuality" to setOf("SUPER_FINE", "FINE"),
+            "Timelapse" to setOf("OFF", "1SEC", "5SEC", "10SEC", "30SEC", "60SEC"),
+            "SlowMotion" to setOf("X1", "X2", "X4", "X8"),
+            "VideoOffTime" to setOf("0MIN", "5SEC", "10SEC", "15SEC", "30SEC",
+                "1MIN", "2MIN", "3MIN", "5MIN", "10MIN", "15MIN", "30MIN", "60MIN"),
+            "MotionDetect" to setOf("OFF", "LOW", "MID", "HIGH"),
+            "MotionVideoTime" to setOf("5", "10", "30", "60"),
+            "ParkingMonitor" to setOf("ENABLE", "DISABLE"),
+            "GSensor" to setOf("OFF", "LEVEL0", "LEVEL1", "LEVEL2", "LEVEL3", "LEVEL4"),
+            "HDR" to setOf("ON", "OFF"),
+            "NightMode" to setOf("ON", "OFF"),
+            "AutoRec" to setOf("ON", "OFF"),
+            "VideoPreRecord" to setOf("ON", "OFF"),
+            "SoundRecord" to setOf("ON", "OFF")
+        )
+        validatedEnums[property]?.let { choices ->
+            require(value in choices) { "$property 参数无效：$value" }
+        }
+        require(value.isNotBlank() && value.length <= 64 && !value.any { it.isISOControl() }) {
+            "$property 的值为空、过长或包含控制字符"
+        }
         return command { DvrProtocol.configSet(it, property, value) }
     }
 
@@ -416,7 +441,18 @@ class DvrRepository(context: Context) {
     private suspend fun command(urlForIp: (String) -> String): Result<String> = withContext(Dispatchers.IO) {
         val ip = status.value.ip
             ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
-        runCatching { get(urlForIp(ip)) }
+        runCatching {
+            val raw = get(urlForIp(ip))
+            val normalized = raw.trim()
+            if (normalized.contains("<html", ignoreCase = true) ||
+                normalized.contains("<!doctype html", ignoreCase = true) ||
+                normalized.contains("Congratulations! The server is up", ignoreCase = true) ||
+                normalized.contains("unknown property", ignoreCase = true) ||
+                normalized.contains("not support", ignoreCase = true)) {
+                error("设备未返回有效的 CGI 操作响应")
+            }
+            raw
+        }
     }
 
     private fun get(url: String): String {
