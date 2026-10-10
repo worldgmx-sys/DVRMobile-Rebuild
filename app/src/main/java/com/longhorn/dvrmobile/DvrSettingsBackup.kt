@@ -36,13 +36,6 @@ data class DvrSettingsBackup(
         sigma.toSortedMap().forEach { (key, value) -> sigmaObject.put(key, value) }
         root.put("sigma", sigmaObject)
 
-        val astar = JSONObject()
-        astar.putOpt("aiEnabled", aiEnabled)
-        astar.putOpt("parkingMode", parkingMode)
-        astar.putOpt("parkingGSensor", parkingGSensor)
-        astar.putOpt("peopleRoi", peopleRoi)
-        astar.putOpt("peopleDetectDuration", peopleDetectDuration)
-        root.put("astar", astar)
 
         return root.toString(2)
     }
@@ -62,7 +55,7 @@ data class DvrSettingsBackup(
                 if (value.isNotBlank()) sigma[key] = value
             }
 
-            val astar = root.optJSONObject("astar") ?: JSONObject()
+            // Legacy backups can contain AStar fields; ignore them on SigmaStar S38.
 
             fun nullableBoolean(obj: JSONObject, key: String): Boolean? =
                 if (obj.has(key) && !obj.isNull(key)) obj.optBoolean(key) else null
@@ -83,11 +76,11 @@ data class DvrSettingsBackup(
                 dvrEnabled = nullableBoolean(device, "dvrEnabled"),
                 micEnabled = nullableBoolean(device, "micEnabled"),
                 sigma = sigma,
-                aiEnabled = nullableBoolean(astar, "aiEnabled"),
-                parkingMode = nullableInt(astar, "parkingMode"),
-                parkingGSensor = nullableInt(astar, "parkingGSensor"),
-                peopleRoi = nullableString(astar, "peopleRoi"),
-                peopleDetectDuration = nullableInt(astar, "peopleDetectDuration"),
+                aiEnabled = null,
+                parkingMode = null,
+                parkingGSensor = null,
+                peopleRoi = null,
+                peopleDetectDuration = null,
             )
         }
     }
@@ -102,7 +95,7 @@ data class RestoreReport(
 ) {
     val summary: String
         get() = "恢复完成：成功 $applied 项，跳过 $skipped 项，失败 $failed 项" +
-            if (restartMayBeRequired) "；AI 开关变化可能触发设备重启" else ""
+            if (restartMayBeRequired) "；部分设置可能需要设备重启" else ""
 }
 
 object DvrBackupCatalog {
@@ -113,7 +106,7 @@ object DvrBackupCatalog {
         "MicSensitivity", "VideoQuality", "VoiceSwitch", "Flicker",
         "ISO", "AWB", "EV", "DateLogoStamp", "GpsStamp", "SpeedStamp",
         "Brightness", "Contrast", "Saturation", "Sharpness",
-        "ParkingMonitor", "GSensor", "PowerOnGSensor"
+        "ParkingMonitor", "GSensor"
     )
 
     val sigmaWritableProperties = sigmaReadableProperties.toSet()
