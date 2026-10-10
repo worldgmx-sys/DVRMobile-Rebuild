@@ -29,9 +29,9 @@ private val catalog = listOf(
         f("视频码率", "setbitrate", hint="固件没有任何参数范围检查，也未确认单位；暂禁用任意写入", writable=false),
         f("自动录像", "AutoRec", "ON", "OFF", hint="固件命令存在反向编码"),
         f("预录", "VideoPreRecord", "ON", "OFF", hint="固件命令存在反向编码"),
-        f("延时录像", "Timelapse", hint="当前未校验可用枚举，暂禁用任意输入", writable=false),
-        f("慢动作", "SlowMotion", hint="当前未校验可用枚举，暂禁用任意输入", writable=false),
-        f("自动停止录像时间", "VideoOffTime", hint="具体有效枚举需实机确认")
+        f("延时录像", "Timelapse", "OFF", "1SEC", "5SEC", "10SEC", "30SEC", "60SEC", hint="枚举及 FIFO 映射已从 CGI 验证；实机效果待测"),
+        f("慢动作", "SlowMotion", "X1", "X2", "X4", "X8", hint="枚举及 FIFO 映射已从 CGI 验证；实机效果待测"),
+        f("自动停止录像时间", "VideoOffTime", "0MIN", "5SEC", "10SEC", "15SEC", "30SEC", "1MIN", "2MIN", "3MIN", "5MIN", hint="设备实际是否停止录像待测")
     )),
     SigmaCategory("图像与拍照", listOf(
         f("照片分辨率", "ImageRes", hint="原厂枚举与硬件能力需实机确认"),
