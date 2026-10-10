@@ -71,30 +71,6 @@ object DvrProtocol {
     fun configSet(ip: String, property: String, value: String) =
         "${base(ip)}/cgi-bin/Config.cgi?action=set&property=$property&value=${encode(value)}"
 
-    /** AStar/Hi3516 PPG/Papago compatibility endpoint recovered from dvr_main. */
-    fun ppg(ip: String, cmd: Int, par: String? = null, str: String? = null): String {
-        val params = mutableListOf(
-            "custom=1",
-            "cmd=$cmd",
-        )
-        par?.let { params += "par=${encode(it)}" }
-        str?.let { params += "str=${encode(it)}" }
-        return "${base(ip)}/?${params.joinToString("&")}"
-    }
-
-    fun ppgSupportedCommands(ip: String) = ppg(ip, 3002)
-    fun ppgStatusAll(ip: String) = ppg(ip, 3014)
-    fun ppgSaveSettings(ip: String) = ppg(ip, 3021)
-    fun ppgOptions(ip: String) = ppg(ip, 3031)
-    fun ppgRead(ip: String, cmd: Int) = ppg(ip, cmd)
-    fun aiActiveTest(ip: String) = ppg(ip, 9023)
-    fun setAlgEnabled(ip: String, enabled: Boolean) = ppg(ip, 9096, par = if (enabled) "1" else "0")
-    fun setPeopleRoi(ip: String, roi: String) = ppg(ip, 9097, str = roi)
-    fun getPeopleRoi(ip: String) = ppg(ip, 9098)
-    fun setPeopleDetectDuration(ip: String, value: Int) = ppg(ip, 9099, par = value.toString())
-    fun setParkingGSensorAStar(ip: String, level: Int) = ppg(ip, 9106, par = level.toString())
-    fun setParkingModeAStar(ip: String, mode: Int) = ppg(ip, 9137, par = mode.toString())
-
     /** SigmaStar Config.cgi compatibility controls recovered from CGI_PROCESS.sh. */
     fun setParkingMonitor(ip: String, enabled: Boolean) =
         configSet(ip, "ParkingMonitor", if (enabled) "ENABLE" else "DISABLE")
