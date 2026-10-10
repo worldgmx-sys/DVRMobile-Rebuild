@@ -186,7 +186,7 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
             _message.value = if (result.isSuccess) {
                 // A successful HTTP response is not proof that cardv accepted the FIFO command.
                 // Do not pollute sigmaValues (verified read-back state) with optimistic writes.
-                "$label 命令已发送：$value；实际生效需通过录像/设备状态验证"
+                "$label 命令已发送${if (property.contains("CryptoKey")) "" else "：$value"}；实际生效需通过录像/设备状态验证"
             } else {
                 "$label 设置失败：${result.exceptionOrNull()?.message}"
             }
