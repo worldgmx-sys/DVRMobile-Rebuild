@@ -257,11 +257,6 @@ class DvrRepository(context: Context) {
                 }
             }
 
-            val liveRoi = getPeopleRoi().getOrNull() ?: advanced.peopleRoi.takeIf {
-                DvrResponseParser.isValidRoi(it)
-            }
-            val aiActive = aiActiveTest().getOrNull()
-
             DvrSettingsBackup(
                 appVersion = appVersion,
                 deviceModel = device.dvrModel,
@@ -270,16 +265,13 @@ class DvrRepository(context: Context) {
                 dvrEnabled = device.dvrEnabled,
                 micEnabled = device.mic,
                 sigma = sigma,
-                aiEnabled = advanced.aiEnabled,
-                parkingMode = advanced.parkingMode?.value,
-                parkingGSensor = advanced.parkingGSensorLevel,
-                peopleRoi = liveRoi,
-                peopleDetectDuration = advanced.peopleDetectDuration,
-            ).also {
-                // AI active is deliberately not persisted as a setting; it is runtime/license state.
-                @Suppress("UNUSED_VARIABLE")
-                val ignoredRuntimeState = aiActive
-            }
+                aiEnabled = null,
+                parkingMode = null,
+                parkingGSensor = null,
+                peopleRoi = null,
+                peopleDetectDuration = null,
+            )
+
         }
     }
 
@@ -353,48 +345,14 @@ class DvrRepository(context: Context) {
                     }
                 }
 
-                backup.peopleRoi?.let { roi ->
-                    if (DvrResponseParser.isValidRoi(roi)) {
-                        applySetting("人员检测 ROI") { setPeopleRoi(roi) }
-                    } else {
-                        skipped++
-                        details += "跳过：备份中的 ROI 无效"
-                    }
-                } ?: run { skipped++ }
-
-                backup.peopleDetectDuration?.let { value ->
-                    if (value in 0..120) {
-                        applySetting("人员检测持续时间=$value") { setPeopleDetectDuration(value) }
-                    } else {
-                        skipped++
-                        details += "跳过：人员检测持续时间超出安全范围"
-                    }
-                } ?: run { skipped++ }
-
-                backup.parkingGSensor?.let { level ->
-                    if (level in 0..3) {
-                        applySetting("AStar 停车 G-sensor=$level") { setParkingGSensor(level) }
-                    } else {
-                        skipped++
-                        details += "跳过：AStar 停车 G-sensor 档位无效"
-                    }
-                } ?: run { skipped++ }
-
-                backup.parkingMode?.let { value ->
-                    val mode = ParkingMode.fromValue(value)
-                    if (mode != null) {
-                        applySetting("AStar 驻车模式=${mode.label}") { setParkingMode(mode) }
-                    } else {
-                        skipped++
-                        details += "跳过：未知驻车模式 $value"
-                    }
-                } ?: run { skipped++ }
-
-                // Apply AI enable last because original firmware may immediately reboot after changing it.
-                backup.aiEnabled?.let { enabled ->
-                    restartMayBeRequired = true
-                    applySetting("AI 总开关=$enabled") { setAlgEnabled(enabled) }
-                } ?: run { skipped++ }
+                // AStar fields in legacy backup files are intentionally ignored.
+                // Never dispatch PPG/Sentinel/ROI commands on a SigmaStar S38 device.
+                if (backup.peopleRoi != null || backup.peopleDetectDuration != null ||
+                    backup.parkingGSensor != null || backup.parkingMode != null ||
+                    backup.aiEnabled != null) {
+                    skipped++
+                    details += "跳过：旧版备份中的 AStar/PPG 字段（SigmaStar 不支持）"
+                }
 
                 RestoreReport(
                     applied = applied,
@@ -620,7 +578,7 @@ class DvrRepository(context: Context) {
         if (text.isBlank()) return null
         // Some OEM GET shell branches accidentally echo the nvconf command
         // rather than executing it. Such text is NOT a live setting value.
-        if (Regex("""(?i)(?:^|[=:\\s])nvconf\\s+get\\s+\\d+\\s+""").containsMatchIn(text)) return null
+        if (Regex("""(?i)(?:^|[=:\s])nvconf\s+get\s+\d+\s+""").containsMatchIn(text)) return null
         val lower = text.lowercase()
         if ("unsupported" in lower || "not support" in lower || "unknown property" in lower) return null
         if ("<html" in lower || "<!doctype html" in lower || "congratulations!" in lower) return null
