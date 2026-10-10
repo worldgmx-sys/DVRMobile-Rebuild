@@ -241,7 +241,7 @@ class DvrRepository(context: Context) {
                     val result = block()
                     if (result.isSuccess) {
                         applied++
-                        details += "成功：$label"
+                        details += "请求已接收（未验证实际生效）：$label"
                     } else {
                         failed++
                         details += "失败：$label - ${result.exceptionOrNull()?.message ?: "未知错误"}"
@@ -262,11 +262,19 @@ class DvrRepository(context: Context) {
                         details += "跳过：$property 不在允许恢复列表"
                     } else {
                         when (property) {
-                            "ParkingMonitor" -> applySetting("$property=$value") {
-                                setSigmaParkingMonitor(value.equals("ENABLE", true) || value == "1" || value.equals("ON", true))
+                            "ParkingMonitor" -> {
+                                if (value == "ENABLE" || value == "DISABLE") {
+                                    applySetting("$property=$value") { setSigmaProperty(property, value) }
+                                } else {
+                                    skipped++
+                                    details += "跳过：停车监控值不在原厂允许范围"
+                                }
                             }
-                            "GSensor" -> applySetting("$property=$value") { setSigmaGSensor(value) }
-                            "PowerOnGSensor" -> applySetting("$property=$value") { setSigmaPowerOnGSensor(value) }
+                            "GSensor" -> applySetting("$property=$value") { setSigmaProperty(property, value) }
+                            "PowerOnGSensor" -> {
+                                skipped++
+                                details += "跳过：PowerOnGSensor 与停车监控共用 park 命令，禁止备份恢复"
+                            }
                             else -> applySetting("$property=$value") { setSigmaProperty(property, value) }
                         }
                     }
