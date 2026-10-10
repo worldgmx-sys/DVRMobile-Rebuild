@@ -44,7 +44,7 @@ class DvrRepository(context: Context) {
     suspend fun probe(): Result<String> = command { DvrProtocol.getDvr(it) }
     suspend fun startRecording() = command { DvrProtocol.video(it, "recordon") }
     suspend fun stopRecording() = command { DvrProtocol.video(it, "recordoff") }
-    suspend fun eventRecording() = command { DvrProtocol.video(it, "event") }
+    suspend fun eventRecording() = command { DvrProtocol.video(it, "record") }
     suspend fun setMic(on: Boolean) = command { DvrProtocol.setMic(it, on) }
     suspend fun setDvr(on: Boolean) = command { DvrProtocol.setDvr(it, on) }
     suspend fun removeSd() = command { DvrProtocol.removeSd(it) }
