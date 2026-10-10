@@ -23,7 +23,7 @@ private val catalog = listOf(
     SigmaCategory("视频录像与编码", listOf(
         f("视频分辨率", "VideoRes", "2160P25fps", "1440P30fps", "1080P30fps", "1080P27.5fpsHDR", "720P30fps", "720P27.5fpsHDR", "720P60fps", "VGA", hint="4K/HDR/高帧率档位未经过 S38 实机验证"),
         f("循环录像时长", "LoopingVideo", "1MIN", "2MIN", "3MIN", "5MIN", "10MIN", "15MIN", hint="实机已验证；原厂 OFF 实际映射为一分钟"),
-        f("视频质量", "VideoQuality", "STANDARD", "LOW"),
+        f("视频质量", "VideoQuality", "SUPER_FINE", "FINE"),
         f("视频码率", "setbitrate", hint="输入原厂固件接受的码率数值；设备范围未确认"),
         f("自动录像", "AutoRec", "ON", "OFF", hint="固件命令存在反向编码"),
         f("预录", "VideoPreRecord", "ON", "OFF", hint="固件命令存在反向编码"),
