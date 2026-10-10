@@ -11,13 +11,15 @@ private data class SigmaField(
     val label: String, val property: String,
     val values: List<String> = emptyList(),
     val hint: String = "",
-    val experimental: Boolean = true
+    val experimental: Boolean = true, val risk: Boolean = false, val writable: Boolean = true
 )
 
 private data class SigmaCategory(val title: String, val fields: List<SigmaField>)
 
-private fun f(name: String, key: String, vararg values: String, hint: String = "") =
-    SigmaField(name, key, values.toList(), hint)
+private fun f(
+    name: String, key: String, vararg values: String, hint: String = "",
+    risk: Boolean = false, writable: Boolean = true
+) = SigmaField(name, key, values.toList(), hint, risk = risk, writable = writable)
 
 private val catalog = listOf(
     SigmaCategory("视频录像与编码", listOf(
@@ -77,6 +79,40 @@ private val catalog = listOf(
         f("测速摄像头提醒", "SpeedCamAlert", "ON", "OFF"),
         f("超速提醒", "SpeedLimitAlert", "ON", "OFF")
     )),
+    SigmaCategory("Wi-Fi 与网络（可能导致断联）", listOf(
+        f("热点名称 SSID", "Net.WIFI_AP.SSID", hint="修改后车机可能断联，请确认新 SSID", risk=true),
+        f("热点密码", "Net.WIFI_AP.CryptoKey", hint="密码输入后不会展示在状态信息中；修改会导致车机断联", risk=true),
+        f("STA 目标网络名称", "Net.WIFI_STA.AP.2.SSID", risk=true),
+        f("STA 目标网络密码", "Net.WIFI_STA.AP.2.CryptoKey", risk=true),
+        f("AP/STA 模式切换", "Net.WIFI_STA.AP.Switch",
+            "ENABLE", hint="可能改变设备可访问网络，需备好恢复方式", risk=true)
+    )),
+    SigmaCategory("原厂维护与危险操作（仅列出能力）", listOf(
+        f("停车唤醒 G-sensor", "PowerOnGSensor",
+            hint="和停车监控共用 park FIFO 指令，存在覆盖风险", writable=false),
+        f("设置 MJPEG 时间戳", "Camera.Preview.MJPEG.TimeStamp",
+            hint="原厂使用特殊时间格式，未确认前不执行", writable=false),
+        f("网络重置", "Net", hint="会中断设备网络连接", writable=false),
+        f("设备录像控制", "Video",
+            hint="开始、停止、事件录像和拍照已放在实时页面", writable=false),
+        f("关机/供电控制", "Camera.System.Power",
+            hint="可能影响停车监控和电源管理", writable=false),
+        f("恢复出厂设置", "FactoryReset",
+            hint="会清除设备配置，需独立操作确认", writable=false),
+        f("重启设备", "reboot", hint="可能中断正在写入的录像", writable=false),
+        f("SD 卡格式化", "SD0",
+            hint="格式化功能已在设置页面单独提供确认对话框", writable=false),
+        f("重新加载录像配置", "Setting",
+            hint="可能停止并重新开始录像", writable=false),
+        f("位置数据新增", "PosSetting_Add",
+            hint="输入结构未知，暂不发送数据", writable=false),
+        f("删除最后一条位置数据", "PosSetting_DelLast",
+            hint="不可撤销，暂不开放", writable=false),
+        f("清空位置数据", "PosSetting_DelAll",
+            hint="不可撤销，暂不开放", writable=false),
+        f("系统重启另一接口", "RebootSystem",
+            hint="与 reboot 类似，暂不重复开放", writable=false)
+    )),
     SigmaCategory("屏幕、系统与时间", listOf(
         f("语言", "Language", hint="需使用设备已有语言枚举"),
         f("LCD 亮度", "LCDBrightness", hint="无屏设备可能不生效"),
@@ -132,26 +168,48 @@ fun SigmaStarAdvancedControls(enabled: Boolean, vm: DvrViewModel, modifier: Modi
 @Composable
 private fun SigmaSettingField(field: SigmaField, selected: String?, enabled: Boolean, vm: DvrViewModel) {
     var text by remember(field.property) { mutableStateOf("") }
+    var pendingValue by remember(field.property) { mutableStateOf<String?>(null) }
+    val isSecret = field.property.contains("CryptoKey")
+    fun submit(value: String) {
+        if (field.risk) pendingValue = value else vm.setSigmaProperty(field.property, value, field.label)
+    }
+    pendingValue?.let { value ->
+        AlertDialog(
+            onDismissRequest = { pendingValue = null },
+            title = { Text("确认修改 ${field.label}？") },
+            text = { Text("该操作可能使车机与记录仪断开连接。请确认已准备好重新连接，并且参数填写正确。") },
+            confirmButton = {
+                Button(onClick = {
+                    vm.setSigmaProperty(field.property, value, field.label)
+                    pendingValue = null
+                }) { Text("确认发送") }
+            },
+            dismissButton = { TextButton(onClick = { pendingValue = null }) { Text("取消") } }
+        )
+    }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(field.label, style = MaterialTheme.typography.labelLarge)
         Text("CGI: ${field.property}" + (selected?.let { " · 设备读回：$it" } ?: " · 设备值未验证"),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (field.hint.isNotEmpty()) Text(field.hint, style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (field.values.isNotEmpty()) {
+        if (!field.writable) {
+            Text("仅展示固件能力；该操作目前未启用", style = MaterialTheme.typography.bodySmall)
+        } else if (field.values.isNotEmpty()) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 field.values.forEach { value ->
                     FilterChip(selected = selected?.equals(value, ignoreCase = true) == true,
-                        onClick = { vm.setSigmaProperty(field.property, value, field.label) },
+                        onClick = { submit(value) },
                         enabled = enabled, label = { Text(value) })
                 }
             }
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(value = text, onValueChange = { text = it.take(64) },
-                    label = { Text("参数值") }, singleLine = true, modifier = Modifier.weight(1f))
-                Button(onClick = { vm.setSigmaProperty(field.property, text.trim(), field.label) },
+                    label = { Text("参数值") }, singleLine = true, modifier = Modifier.weight(1f),
+                    visualTransformation = if (isSecret) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None)
+                Button(onClick = { submit(text.trim()) },
                     enabled = enabled && text.isNotBlank()) { Text("发送") }
             }
         }
