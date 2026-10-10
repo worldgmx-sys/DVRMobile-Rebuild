@@ -89,6 +89,7 @@ class DvrRepository(context: Context) {
     }
 
     suspend fun setSigmaProperty(property: String, value: String): Result<String> {
+        return runCatching {
         val allowed = setOf(
             "VideoRes", "LoopingVideo", "VideoQuality", "setbitrate", "AutoRec",
             "VideoPreRecord", "Timelapse", "SlowMotion", "VideoOffTime",
@@ -131,7 +132,8 @@ class DvrRepository(context: Context) {
         require(value.isNotBlank() && value.length <= 64 && !value.any { it.isISOControl() }) {
             "$property 的值为空、过长或包含控制字符"
         }
-        return command { DvrProtocol.configSet(it, property, value) }
+        command { DvrProtocol.configSet(it, property, value) }
+        }.getOrElse { Result.failure(it) }
     }
 
     suspend fun syncAdvancedSettings(current: AdvancedDvrState): Result<AdvancedDvrState> =
