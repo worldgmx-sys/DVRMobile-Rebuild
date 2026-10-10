@@ -4,173 +4,156 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
+private data class SigmaField(
+    val label: String, val property: String,
+    val values: List<String> = emptyList(),
+    val hint: String = "",
+    val experimental: Boolean = true
+)
+
+private data class SigmaCategory(val title: String, val fields: List<SigmaField>)
+
+private fun f(name: String, key: String, vararg values: String, hint: String = "") =
+    SigmaField(name, key, values.toList(), hint)
+
+private val catalog = listOf(
+    SigmaCategory("视频录像与编码", listOf(
+        f("视频分辨率", "VideoRes", "2160P25fps", "1440P30fps", "1080P30fps", "1080P27.5fpsHDR", "720P30fps", "720P27.5fpsHDR", "720P60fps", "VGA", hint="4K/HDR/高帧率档位未经过 S38 实机验证"),
+        f("循环录像时长", "LoopingVideo", "1MIN", "2MIN", "3MIN", "5MIN", "10MIN", "15MIN", hint="实机已验证；原厂 OFF 实际映射为一分钟"),
+        f("视频质量", "VideoQuality", "STANDARD", "LOW"),
+        f("视频码率", "setbitrate", hint="输入原厂固件接受的码率数值；设备范围未确认"),
+        f("自动录像", "AutoRec", "ON", "OFF", hint="固件命令存在反向编码"),
+        f("预录", "VideoPreRecord", "ON", "OFF", hint="固件命令存在反向编码"),
+        f("延时录像", "Timelapse", hint="具体有效枚举需实机确认"),
+        f("慢动作", "SlowMotion", hint="具体有效枚举需实机确认"),
+        f("自动停止录像时间", "VideoOffTime", hint="具体有效枚举需实机确认")
+    )),
+    SigmaCategory("图像与拍照", listOf(
+        f("照片分辨率", "ImageRes", hint="原厂枚举与硬件能力需实机确认"),
+        f("连拍数量", "StillBurstShot", hint="具体有效枚举需实机确认"),
+        f("亮度", "Brightness", hint="数值范围依录像程序约束"),
+        f("对比度", "Contrast"),
+        f("色相", "Hue"),
+        f("饱和度", "Saturation"),
+        f("锐度", "Sharpness"),
+        f("Gamma", "Gamma"),
+        f("曝光补偿", "EV", "EVN200", "EVN167", "EVN133", "EVN100", "EVN67", "EVN33", "EV0", "EVP33", "EVP67", "EVP100", "EVP133", "EVP167", "EVP200"),
+        f("自动曝光", "AE", hint="请按原厂支持的枚举输入"),
+        f("ISO", "ISO", "ISO_AUTO", "ISO_100", "ISO_200", "ISO_400", "ISO_800", "ISO_1600", "ISO_3200"),
+        f("图像效果", "Effect"),
+        f("防闪烁", "Flicker", "50HZ", "60HZ"),
+        f("白平衡", "AWB", "Auto", "Daylight", "Cloudy", "Fluorescent1", "Fluorescent2", "Fluorescent3", "Incandescent"),
+        f("快门", "Shutter"),
+        f("HDR", "HDR", "ON", "OFF"),
+        f("夜间模式", "NightMode", "ON", "OFF")
+    )),
+    SigmaCategory("音频", listOf(
+        f("录像录音", "SoundRecord", "ON", "OFF", hint="固件内部 0/1 反向编码"),
+        f("麦克风灵敏度", "MicSensitivity", "STANDARD", "LOW"),
+        f("风噪抑制", "WNR", "ON", "OFF"),
+        f("播放音量", "PlaybackVolume"),
+        f("提示音", "Beep", "ON", "OFF"),
+        f("语音提示", "VoiceSwitch", "ON", "OFF")
+    )),
+    SigmaCategory("停车、碰撞与移动侦测", listOf(
+        f("停车监控", "ParkingMonitor", "ENABLE", "DISABLE"),
+        f("行车碰撞检测", "GSensor", "OFF", "LEVEL0", "LEVEL1", "LEVEL2", "LEVEL3", "LEVEL4"),
+        f("移动侦测", "MotionDetect", "OFF", "LOW", "MID", "HIGH"),
+        f("移动侦测录像时长", "MotionVideoTime", "5", "10", "30", "60")
+    )),
+    SigmaCategory("驾驶辅助、水印与位置", listOf(
+        f("车道偏离预警", "LDWS", "ON", "OFF"),
+        f("前车碰撞预警", "FCWS", "ON", "OFF"),
+        f("前车起步提醒", "SAG", "ON", "OFF"),
+        f("GPS 水印", "GpsStamp", "ON", "OFF"),
+        f("速度水印", "SpeedStamp", "ON", "OFF"),
+        f("录像水印", "RecStamp", "ON", "OFF"),
+        f("日期与徽标水印", "DateLogoStamp", "DATELOGO", "DATE", "LOGO", "OFF"),
+        f("时间日期格式", "DateTimeFormat"),
+        f("速度单位", "SpeedUint"),
+        f("测速摄像头提醒", "SpeedCamAlert", "ON", "OFF"),
+        f("超速提醒", "SpeedLimitAlert", "ON", "OFF")
+    )),
+    SigmaCategory("屏幕、系统与时间", listOf(
+        f("语言", "Language", hint="需使用设备已有语言枚举"),
+        f("LCD 亮度", "LCDBrightness", hint="无屏设备可能不生效"),
+        f("LCD 节电", "LcdPowerSave", hint="无屏设备可能不生效"),
+        f("自动关机", "AutoPowerOff"),
+        f("USB 模式", "UsbFunction", hint="可能改变 USB 连接功能"),
+        f("时区", "TimeZone"),
+        f("同步时间", "SyncTime", hint="须按原厂支持的格式输入"),
+        f("手动时间", "TimeSettings", hint="须按原厂支持的格式输入")
+    ))
+)
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SigmaStarAdvancedControls(
-    enabled: Boolean,
-    vm: DvrViewModel,
-    modifier: Modifier = Modifier,
-) {
+fun SigmaStarAdvancedControls(enabled: Boolean, vm: DvrViewModel, modifier: Modifier = Modifier) {
     val advanced by vm.advanced.collectAsStateWithLifecycle()
     val current = advanced.sigmaValues
+    var showExperimental by remember { mutableStateOf(false) }
 
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("SigmaStar 影像与高级参数", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Text(
-            "以下取值来自原厂 CGI_PROCESS.sh；仅在 SigmaStar 平台生效。AStar/其他平台不支持时会返回错误。",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
-        )
-
-        ChoiceSetting("视频分辨率", "VideoRes", listOf(
-            "2160P25fps", "1440P30fps", "1080P30fps",
-            "1080P27.5fpsHDR", "720P30fps", "720P27.5fpsHDR", "720P60fps"
-        ), current["VideoRes"], enabled, vm)
-
-        ChoiceSetting("循环录像", "LoopingVideo",
-            listOf("OFF", "1MIN", "2MIN", "3MIN", "5MIN", "10MIN", "15MIN"), current["LoopingVideo"], enabled, vm)
-
-        ChoiceSetting("移动侦测", "MotionDetect",
-            listOf("OFF", "LOW", "MID", "HIGH"), current["MotionDetect"], enabled, vm)
-
-        ChoiceSetting("移动侦测录像时长", "MotionVideoTime",
-            listOf("5", "10", "30", "60"), current["MotionVideoTime"], enabled, vm)
-
-        ToggleChoice("HDR", "HDR", current["HDR"], enabled, vm)
-        ToggleChoice("WNR 风噪/降噪", "WNR", current["WNR"], enabled, vm)
-        ToggleChoice("夜间模式", "NightMode", current["NightMode"], enabled, vm)
-        ToggleChoice("LDWS 车道偏离预警", "LDWS", current["LDWS"], enabled, vm)
-        ToggleChoice("FCWS 前碰撞预警", "FCWS", current["FCWS"], enabled, vm)
-        ToggleChoice("SAG 前车起步提醒", "SAG", current["SAG"], enabled, vm)
-        ToggleChoice("自动录像", "AutoRec", current["AutoRec"], enabled, vm)
-        ToggleChoice("预录", "VideoPreRecord", current["VideoPreRecord"], enabled, vm)
-        ToggleChoice("语音提示", "VoiceSwitch", current["VoiceSwitch"], enabled, vm)
-        ToggleChoice("GPS 水印", "GpsStamp", current["GpsStamp"], enabled, vm)
-        ToggleChoice("速度水印", "SpeedStamp", current["SpeedStamp"], enabled, vm)
-
-        ChoiceSetting("慢动作", "SlowMotion",
-            listOf("X1", "X2", "X4", "X8"), current["SlowMotion"], enabled, vm)
-
-        ChoiceSetting("延时录像间隔", "Timelapse",
-            listOf("OFF", "1SEC", "5SEC", "10SEC", "30SEC", "60SEC"), current["Timelapse"], enabled, vm)
-
-        ChoiceSetting("麦克风灵敏度", "MicSensitivity",
-            listOf("STANDARD", "LOW"), current["MicSensitivity"], enabled, vm)
-
-        ChoiceSetting("录像画质", "VideoQuality",
-            listOf("SUPER_FINE", "FINE"), current["VideoQuality"], enabled, vm)
-
-        ChoiceSetting("防闪烁", "Flicker",
-            listOf("50HZ", "60HZ"), current["Flicker"], enabled, vm)
-
-        ChoiceSetting("ISO", "ISO",
-            listOf("ISO_AUTO", "ISO_100", "ISO_200", "ISO_400", "ISO_800", "ISO_1600", "ISO_3200"),
-            current["ISO"], enabled, vm)
-
-        ChoiceSetting("白平衡", "AWB",
-            listOf("Auto", "Daylight", "Cloudy", "Fluorescent1", "Fluorescent2", "Fluorescent3", "Incandescent"),
-            current["AWB"], enabled, vm)
-
-        ChoiceSetting("曝光补偿", "EV",
-            listOf(
-                "EVN200", "EVN167", "EVN133", "EVN100", "EVN67", "EVN33",
-                "EV0",
-                "EVP33", "EVP67", "EVP100", "EVP133", "EVP167", "EVP200"
-            ),
-            current["EV"], enabled, vm)
-
-        ChoiceSetting("日期/Logo 水印", "DateLogoStamp",
-            listOf("DATELOGO", "DATE", "LOGO", "OFF"), current["DateLogoStamp"], enabled, vm)
-
-        NumericSetting("亮度", "Brightness", 0, 100, current["Brightness"], enabled, vm)
-        NumericSetting("对比度", "Contrast", 0, 100, current["Contrast"], enabled, vm)
-        NumericSetting("饱和度", "Saturation", 0, 127, current["Saturation"], enabled, vm)
-        NumericSetting("锐度", "Sharpness", 0, 1023, current["Sharpness"], enabled, vm)
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("设置仅供 SigmaStar S38 设备使用。除循环录像外，多数功能尚未实机验证。", style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = showExperimental, onClick = { showExperimental = !showExperimental },
+                label = { Text(if (showExperimental) "显示全部实验性设置" else "显示已确认设置") })
+        }
+        catalog.forEach { group ->
+            var expanded by remember(group.title) { mutableStateOf(group.title == "视频录像与编码") }
+            OutlinedCard {
+                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { expanded = !expanded }) {
+                        Text("${group.title}（${group.fields.size} 项）${if (expanded) " ▲" else " ▼"}")
+                    }
+                    if (expanded) {
+                        group.fields.filter { showExperimental || it.property == "LoopingVideo" }.forEach { field ->
+                            SigmaSettingField(
+                                field = field, selected = current[field.property], enabled = enabled, vm = vm
+                            )
+                            HorizontalDivider()
+                        }
+                        if (!showExperimental && group.fields.none { it.property == "LoopingVideo" }) {
+                            Text("开启“显示全部实验性设置”后可查看", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        }
+        Text("高风险功能：停车唤醒 G-sensor、Wi-Fi 密码与模式、SD 格式化、复位、重启、电源管理和位置数据删除未作为普通一键设置开放。避免误操作导致车机断联、录像中断或数据丢失。",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ChoiceSetting(
-    title: String,
-    property: String,
-    values: List<String>,
-    selectedValue: String?,
-    enabled: Boolean,
-    vm: DvrViewModel,
-) {
+private fun SigmaSettingField(field: SigmaField, selected: String?, enabled: Boolean, vm: DvrViewModel) {
+    var text by remember(field.property) { mutableStateOf("") }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(title, style = MaterialTheme.typography.labelLarge)
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            values.forEach { value ->
-                FilterChip(
-                    selected = selectedValue?.equals(value, ignoreCase = true) == true,
-                    onClick = { vm.setSigmaProperty(property, value, title) },
-                    enabled = enabled,
-                    label = { Text(value) }
-                )
+        Text(field.label, style = MaterialTheme.typography.labelLarge)
+        Text("CGI: ${field.property}" + (selected?.let { " · 设备读回：$it" } ?: " · 设备值未验证"),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (field.hint.isNotEmpty()) Text(field.hint, style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (field.values.isNotEmpty()) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                field.values.forEach { value ->
+                    FilterChip(selected = selected?.equals(value, ignoreCase = true) == true,
+                        onClick = { vm.setSigmaProperty(field.property, value, field.label) },
+                        enabled = enabled, label = { Text(value) })
+                }
             }
-        }
-    }
-}
-
-@Composable
-private fun ToggleChoice(
-    title: String,
-    property: String,
-    selectedValue: String?,
-    enabled: Boolean,
-    vm: DvrViewModel,
-) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
-        FilterChip(
-            selected = selectedValue?.equals("ON", true) == true || selectedValue == "1" || selectedValue?.equals("ENABLE", true) == true,
-            onClick = { vm.setSigmaProperty(property, "ON", title) },
-            enabled = enabled,
-            label = { Text("开") }
-        )
-        FilterChip(
-            selected = selectedValue?.equals("OFF", true) == true || selectedValue == "0" || selectedValue?.equals("DISABLE", true) == true,
-            onClick = { vm.setSigmaProperty(property, "OFF", title) },
-            enabled = enabled,
-            label = { Text("关") }
-        )
-    }
-}
-
-@Composable
-private fun NumericSetting(
-    title: String,
-    property: String,
-    min: Int,
-    max: Int,
-    selectedValue: String?,
-    enabled: Boolean,
-    vm: DvrViewModel,
-) {
-    var text by remember(selectedValue) { mutableStateOf(selectedValue.orEmpty()) }
-    val value = text.toIntOrNull()
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(
-            value = text,
-            onValueChange = { text = it.filter(Char::isDigit).take(4) },
-            modifier = Modifier.weight(1f),
-            label = { Text("$title ($min–$max)") },
-            singleLine = true,
-        )
-        Button(
-            onClick = { value?.let { vm.setSigmaProperty(property, it.toString(), title) } },
-            enabled = enabled && value != null && value in min..max,
-        ) {
-            Text("设置")
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = text, onValueChange = { text = it.take(64) },
+                    label = { Text("参数值") }, singleLine = true, modifier = Modifier.weight(1f))
+                Button(onClick = { vm.setSigmaProperty(field.property, text.trim(), field.label) },
+                    enabled = enabled && text.isNotBlank()) { Text("发送") }
+            }
         }
     }
 }
