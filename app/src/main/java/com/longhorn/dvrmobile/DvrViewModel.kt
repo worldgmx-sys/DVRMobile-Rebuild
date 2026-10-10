@@ -257,10 +257,9 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val result = repo.setSigmaProperty(property, value)
             _message.value = if (result.isSuccess) {
-                _advanced.value = _advanced.value.copy(
-                    sigmaValues = _advanced.value.sigmaValues + (property to value)
-                )
-                "$label 已设置为 $value"
+                // A successful HTTP response is not proof that cardv accepted the FIFO command.
+                // Do not pollute sigmaValues (verified read-back state) with optimistic writes.
+                "$label 命令已发送：$value；实际生效需通过录像/设备状态验证"
             } else {
                 "$label 设置失败：${result.exceptionOrNull()?.message}"
             }
