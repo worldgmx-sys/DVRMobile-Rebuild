@@ -189,12 +189,17 @@ class DvrRepository(context: Context) {
 
     suspend fun setSigmaProperty(property: String, value: String): Result<String> {
         val allowed = setOf(
-            "VideoRes", "LoopingVideo", "MotionDetect", "MotionVideoTime",
-            "LDWS", "FCWS", "SAG", "NightMode", "WNR", "HDR",
-            "SlowMotion", "Timelapse", "AutoRec", "VideoPreRecord",
-            "MicSensitivity", "VideoQuality", "VoiceSwitch", "Flicker",
-            "ISO", "AWB", "EV", "DateLogoStamp", "GpsStamp", "SpeedStamp",
-            "Brightness", "Contrast", "Saturation", "Sharpness"
+            "VideoRes", "LoopingVideo", "VideoQuality", "setbitrate", "AutoRec",
+            "VideoPreRecord", "Timelapse", "SlowMotion", "VideoOffTime",
+            "ImageRes", "StillBurstShot", "Brightness", "Contrast", "Hue",
+            "Saturation", "Sharpness", "Gamma", "EV", "AE", "ISO",
+            "Effect", "Flicker", "AWB", "Shutter", "HDR", "NightMode",
+            "SoundRecord", "MicSensitivity", "WNR", "PlaybackVolume", "Beep", "VoiceSwitch",
+            "ParkingMonitor", "GSensor", "MotionDetect", "MotionVideoTime",
+            "LDWS", "FCWS", "SAG", "GpsStamp", "SpeedStamp", "RecStamp",
+            "DateLogoStamp", "DateTimeFormat", "SpeedUint", "SpeedCamAlert", "SpeedLimitAlert",
+            "Language", "LCDBrightness", "LcdPowerSave", "AutoPowerOff",
+            "UsbFunction", "TimeZone", "SyncTime", "TimeSettings"
         )
         require(property in allowed) { "不允许的 SigmaStar 参数：$property" }
         return command { DvrProtocol.configSet(it, property, value) }
@@ -204,151 +209,35 @@ class DvrRepository(context: Context) {
         withContext(Dispatchers.IO) {
             val ip = status.value.ip
                 ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
-
             runCatching {
-                var next = current.copy(loading = true, error = null, ppgAvailable = false, aiActive = null, aiEnabled = null, parkingMode = null, parkingGSensorLevel = null, roiReadable = null, sentinelReadable = null, supportedPpgCommands = emptySet(), diagnosticResponses = emptyMap())
-                val notes = mutableListOf<String>()
-                val nativeDiagnostics = linkedMapOf<String, String>()
-                // Read-only targeted probes: avoid 20 sequential timeout-prone calls.
-                val endpoints = listOf(
-                    Triple(80, "deviceattr", "getdeviceattr.cgi"),
-                    Triple(80, "workstate", "getworkstate.cgi"),
-                    Triple(80, "workmode", "getworkmodecmd.cgi"),
-                    Triple(8192, "deviceattr", "getdeviceattr.cgi"),
-                    Triple(8192, "workstate", "getworkstate.cgi"),
-                    Triple(8192, "workmode", "getworkmodecmd.cgi")
-                )
-                endpoints.forEach { (port, label, name) ->
-                    val root = DvrProtocol.nativeCgi(ip, port, name)
-                    nativeDiagnostics["$port/$label/root"] = probeRaw(root)
-                    // Check CGI directory only where an HTTP server is reachable.
-                    if (port == 80) {
-                        val cgi = DvrProtocol.nativeCgi(ip, port, "cgi-bin/$name")
-                        nativeDiagnostics["$port/$label/cgi-bin"] = probeRaw(cgi)
+                val sigma = linkedMapOf<String, String>()
+                // SigmaStar-only: no AStar PPG calls or 8192-port probing.
+                // The OEM CGI script has broken getters for many properties.
+                // Only keep values that pass parseConfigValue.
+                DvrBackupCatalog.sigmaReadableProperties.forEach { property ->
+                    val getter = when (property) {
+                        "VideoRes" -> "Videores"
+                        "LoopingVideo" -> "VideoClipTime"
+                        else -> property
+                    }
+                    val raw = runCatching { get(DvrProtocol.configGet(ip, getter)) }.getOrNull()
+                    raw?.let { parseConfigValue(it, getter) }?.takeIf { it.isNotBlank() }?.let {
+                        sigma[property] = it
                     }
                 }
-
-                // AStar / PPG: directly probe known getters first.
-                // Some production builds accept vendor 90xx commands but do not expose
-                // the generic 3002/3014 capability/status tables.
-                val direct9023 = runCatching { get(DvrProtocol.aiActiveTest(ip)) }.getOrNull()
-                val direct9098 = runCatching { get(DvrProtocol.getPeopleRoi(ip)) }.getOrNull()
-                val direct9137 = runCatching { get(DvrProtocol.ppgRead(ip, 9137)) }.getOrNull()
-
-                val supportedRaw = runCatching { get(DvrProtocol.ppgSupportedCommands(ip)) }.getOrNull()
-                val supportedCommands = supportedRaw?.takeIf { DvrResponseParser.isPpgResponse(it) }?.let(DvrResponseParser::commandNumbers).orEmpty()
-
-                val ppgRaw = runCatching { get(DvrProtocol.ppgStatusAll(ip)) }.getOrNull()
-                val ppgMap = ppgRaw?.takeIf { DvrResponseParser.isPpgResponse(it) }?.let(DvrResponseParser::ppgCommandMap).orEmpty()
-
-                val valid9023 = DvrResponseParser.isPpgResponse(direct9023, 9023)
-                val valid9098 = DvrResponseParser.isPpgResponse(direct9098, 9098)
-                val valid9137 = DvrResponseParser.isPpgResponse(direct9137, 9137)
-                val directAiActive = direct9023?.takeIf { valid9023 }?.let(DvrResponseParser::ppgInt)
-                val directRoi = direct9098?.takeIf { valid9098 }?.let(DvrResponseParser::normalizeRoi)
-                val directParkingMode = direct9137?.takeIf { valid9137 }?.let(DvrResponseParser::ppgInt)
-                val ppgAvailable = valid9023 || valid9098 || valid9137 ||
-                    ppgMap.isNotEmpty() || supportedCommands.isNotEmpty()
-
-                val astarDetected =
-                    ppgAvailable ||
-                    supportedCommands.any { it in 9000..9999 } ||
-                    ppgMap.keys.any { it in setOf(9096, 9099, 9106, 9137) }
-
-                if (astarDetected) {
-                    val aiEnabled = ppgMap[9096]?.let { (statusValue, value) ->
-                        // Firmware Status ALL stores ALG_ENABLE in Status on this product.
-                        statusValue?.let { it == 1 } ?: value?.toIntOrNull()?.let { it == 1 }
-                    }
-
-                    fun commandInt(cmd: Int): Int? {
-                        val item = ppgMap[cmd] ?: return null
-                        return item.second?.toIntOrNull() ?: item.first
-                    }
-
-                    val parkingModeValue = commandInt(9137) ?: directParkingMode ?: readPpgInt(ip, 9137)
-                    val parkingMode = ParkingMode.fromValue(parkingModeValue)
-                    val parkingGSensor = commandInt(9106)?.takeIf { it in 0..3 }
-                    val duration = commandInt(9099)?.takeIf { it in 0..120 }
-                    val aiActive = directAiActive?.let { it == 1 } ?: aiActiveTest().getOrNull()
-                    val roi = directRoi ?: getPeopleRoi().getOrNull()
-
-                    next = next.copy(
-                        aiActive = aiActive ?: next.aiActive,
-                        aiEnabled = aiEnabled ?: next.aiEnabled,
-                        parkingMode = parkingMode ?: next.parkingMode,
-                        parkingGSensorLevel = parkingGSensor ?: next.parkingGSensorLevel,
-                        peopleDetectDuration = duration ?: next.peopleDetectDuration,
-                        peopleRoi = roi ?: next.peopleRoi,
-                        ppgAvailable = ppgAvailable,
-                        supportedPpgCommands = supportedCommands,
-                        roiReadable = if (supportedCommands.isEmpty()) roi != null else (9098 in supportedCommands && roi != null),
-                        sentinelReadable = parkingModeValue != null,
-                        diagnosticResponses = buildMap {
-                            direct9023?.let { put("9023", it.take(500)) }
-                            direct9098?.let { put("9098", it.take(500)) }
-                            direct9137?.let { put("9137", it.take(500)) }
-                            supportedRaw?.let { put("3002", it.take(500)) }
-                            ppgRaw?.let { put("3014", it.take(500)) }
-                        },
-                    )
-                    notes += buildString {
-                        append("AStar/PPG 已同步")
-                        if (supportedCommands.isNotEmpty()) {
-                            append("；扩展CMD=")
-                            append(supportedCommands.sorted().filter { it >= 9000 }.joinToString(","))
-                        }
-                        if (roi == null) append("；ROI不可读")
-                        if (parkingModeValue == null) append("；Sentinel状态不可读")
-                        if (supportedCommands.isEmpty()) append("；3002未提供能力列表，已改用直接探测")
-                    }
-                }
-
-                // SigmaStar: only enumerate the full property catalog after a successful probe,
-                // avoiding dozens of pointless requests on AStar devices.
-                val sigmaProbe = getSigmaProperty("VideoRes").getOrNull()
-                if (sigmaProbe != null) {
-                    val sigma = linkedMapOf<String, String>()
-                    sigma["VideoRes"] = sigmaProbe
-                    DvrBackupCatalog.sigmaReadableProperties
-                        .filterNot { it == "VideoRes" }
-                        .forEach { property ->
-                            getSigmaProperty(property).getOrNull()?.let { value ->
-                                if (value.isNotBlank()) sigma[property] = value
-                            }
-                        }
-
-                    next = next.copy(
-                        sigmaValues = sigma,
-                        sigmaParkingMonitor = sigma["ParkingMonitor"]?.let {
-                            it.equals("ENABLE", true) || it.equals("ON", true) || it == "1"
-                        },
-                        sigmaGSensor = sigma["GSensor"],
-                        sigmaPowerOnGSensor = sigma["PowerOnGSensor"],
-                    )
-                    notes += "SigmaStar 设置已同步 ${sigma.size} 项"
-                }
-
-                if (!astarDetected && sigmaProbe == null) {
-                    val nativeHit = nativeDiagnostics.any { entry ->
-                        val value = entry.value
-                        !value.startsWith("HTTP 404") &&
-                        !value.startsWith("ERROR") &&
-                        !value.contains("Congratulations! The server is up", ignoreCase = true)
-                    }
-                    notes += if (nativeHit) {
-                        "PPG 未挂载；已发现原生 CGI 响应，请查看诊断"
-                    } else {
-                        "PPG 未挂载；80/8192 原生 CGI 暂未识别"
-                    }
-                }
-
-                next.copy(
-                    loading = false,
-                    ppgAvailable = if (next.ppgAvailable == true) true else false,
-                    diagnosticResponses = next.diagnosticResponses + nativeDiagnostics.mapKeys { "native:" + it.key },
-                    lastRawResponse = notes.joinToString("；"),
-                    error = null,
+                current.copy(
+                    loading = false, error = null,
+                    sigmaValues = sigma,
+                    sigmaParkingMonitor = sigma["ParkingMonitor"]?.let {
+                        it.equals("ENABLE", true) || it.equals("ON", true) || it == "1"
+                    },
+                    sigmaGSensor = sigma["GSensor"],
+                    sigmaPowerOnGSensor = null,
+                    aiActive = null, aiEnabled = null, parkingMode = null,
+                    ppgAvailable = false, supportedPpgCommands = emptySet(),
+                    roiReadable = false, sentinelReadable = false,
+                    diagnosticResponses = emptyMap(),
+                    lastRawResponse = "SigmaStar S38：读取到 ${sigma.size} 项可解析的设置；其他字段未验证，未执行 AStar 探测"
                 )
             }
         }
