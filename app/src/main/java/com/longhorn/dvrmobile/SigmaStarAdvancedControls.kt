@@ -130,7 +130,7 @@ private val catalog = listOf(
 fun SigmaStarAdvancedControls(enabled: Boolean, vm: DvrViewModel, modifier: Modifier = Modifier) {
     val advanced by vm.advanced.collectAsStateWithLifecycle()
     val current = advanced.sigmaValues
-    var showExperimental by remember { mutableStateOf(false) }
+    var showExperimental by remember { mutableStateOf(true) }
 
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("设置仅供 SigmaStar S38 设备使用。除循环录像外，多数功能尚未实机验证。", style = MaterialTheme.typography.bodySmall)
