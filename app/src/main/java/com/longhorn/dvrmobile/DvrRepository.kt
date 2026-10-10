@@ -100,7 +100,10 @@ class DvrRepository(context: Context) {
             "LDWS", "FCWS", "SAG", "GpsStamp", "SpeedStamp", "RecStamp",
             "DateLogoStamp", "DateTimeFormat", "SpeedUint", "SpeedCamAlert", "SpeedLimitAlert",
             "Language", "LCDBrightness", "LcdPowerSave", "AutoPowerOff",
-            "UsbFunction", "TimeZone", "SyncTime", "TimeSettings"
+            "UsbFunction", "TimeZone", "SyncTime", "TimeSettings",
+            "Net.WIFI_AP.SSID", "Net.WIFI_AP.CryptoKey",
+            "Net.WIFI_STA.AP.2.SSID", "Net.WIFI_STA.AP.2.CryptoKey",
+            "Net.WIFI_STA.AP.Switch"
         )
         require(property in allowed) { "不允许的 SigmaStar 参数：$property" }
         return command { DvrProtocol.configSet(it, property, value) }
