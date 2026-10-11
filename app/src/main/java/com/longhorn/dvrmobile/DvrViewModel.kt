@@ -9,6 +9,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 data class MediaUiState(
     val kind: DvrMediaFile.Kind = DvrMediaFile.Kind.NORMAL,
@@ -33,6 +36,8 @@ data class DownloadTask(
 
 class DvrViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = DvrRepository(app)
+    private val settingsMutex = Mutex()
+    private var deviceGeneration = 0L
 
     val status = repo.status
 
@@ -58,6 +63,8 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
                 .map { it.ip }
                 .distinctUntilChanged()
                 .collect { ip ->
+                    deviceGeneration++
+                    _advanced.value = AdvancedDvrState(deviceIp = ip)
                     if (!ip.isNullOrBlank()) {
                         repo.initializeClient(BuildConfig.VERSION_CODE.toLong())
                         refreshAdvanced()
@@ -129,66 +136,61 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refreshAdvanced() {
+        if (_advanced.value.loading) return
         viewModelScope.launch {
-            _advanced.value = _advanced.value.copy(loading = true, error = null)
-            val synced = repo.syncAdvancedSettings(_advanced.value)
-            _advanced.value = if (synced.isSuccess) {
-                synced.getOrThrow()
-            } else {
-                _advanced.value.copy(
-                    loading = false,
-                    error = synced.exceptionOrNull()?.message,
-                    lastRawResponse = "设置同步失败：${synced.exceptionOrNull()?.message}",
-                )
+            settingsMutex.withLock {
+                val ip = status.value.ip ?: return@withLock
+                val generation = deviceGeneration
+                _advanced.value = _advanced.value.copy(loading = true, error = null,
+                    sigmaValues = emptyMap(), sigmaReadErrors = emptyMap())
+                val synced = repo.syncAdvancedSettings(_advanced.value)
+                if (status.value.ip != ip || deviceGeneration != generation) return@withLock
+                _advanced.value = synced.getOrElse {
+                    _advanced.value.copy(loading = false, error = it.message,
+                        sigmaValues = emptyMap(), lastRawResponse = "设置同步失败：${it.message}")
+                }
             }
         }
     }
 
-    fun setSigmaParkingMonitor(enabled: Boolean) {
-        viewModelScope.launch {
-            val r = repo.setSigmaParkingMonitor(enabled)
-            if (r.isSuccess) {
-                _advanced.value = _advanced.value.copy(sigmaParkingMonitor = enabled)
-                _message.value = "SigmaStar 停车监控已${if (enabled) "开启" else "关闭"}"
-            } else {
-                _message.value = "停车监控设置失败：${r.exceptionOrNull()?.message}"
-            }
-        }
-    }
+    fun setSigmaParkingMonitor(enabled: Boolean) =
+        setSigmaProperty("ParkingMonitor", if (enabled) "ENABLE" else "DISABLE", "停车监控")
 
-    fun setSigmaGSensor(value: String) {
-        viewModelScope.launch {
-            val r = repo.setSigmaGSensor(value)
-            if (r.isSuccess) {
-                _advanced.value = _advanced.value.copy(sigmaGSensor = value)
-                _message.value = "行车 G-sensor 已设置为 $value"
-            } else {
-                _message.value = "行车 G-sensor 设置失败：${r.exceptionOrNull()?.message}"
-            }
-        }
-    }
+    fun setSigmaGSensor(value: String) = setSigmaProperty("GSensor", value, "行车 G-sensor")
 
-    fun setSigmaPowerOnGSensor(value: String) {
-        viewModelScope.launch {
-            val r = repo.setSigmaPowerOnGSensor(value)
-            if (r.isSuccess) {
-                _advanced.value = _advanced.value.copy(sigmaPowerOnGSensor = value)
-                _message.value = "停车唤醒 G-sensor 已设置为 $value"
-            } else {
-                _message.value = "停车唤醒 G-sensor 设置失败：${r.exceptionOrNull()?.message}"
-            }
-        }
-    }
+    fun setSigmaPowerOnGSensor(value: String) =
+        setSigmaProperty("PowerOnGSensor", value, "停车唤醒 G-sensor")
 
     fun setSigmaProperty(property: String, value: String, label: String = property) {
         viewModelScope.launch {
-            val result = repo.setSigmaProperty(property, value)
-            _message.value = if (result.isSuccess) {
-                // A successful HTTP response is not proof that cardv accepted the FIFO command.
-                // Do not pollute sigmaValues (verified read-back state) with optimistic writes.
-                "$label 命令已发送${if (property.contains("CryptoKey")) "" else "：$value"}；实际生效需通过录像/设备状态验证"
-            } else {
-                "$label 设置失败：${result.exceptionOrNull()?.message}"
+            settingsMutex.withLock {
+                val ip = status.value.ip ?: return@withLock
+                val generation = deviceGeneration
+                _advanced.value = _advanced.value.copy(
+                    sigmaPending = _advanced.value.sigmaPending + property,
+                    sigmaValues = _advanced.value.sigmaValues - property,
+                    sigmaReadErrors = _advanced.value.sigmaReadErrors - property)
+                val result = repo.setSigmaProperty(property, value)
+                if (status.value.ip != ip || deviceGeneration != generation) return@withLock
+                val readback = if (result.isSuccess) {
+                    delay(300)
+                    repo.getSigmaProperty(property)
+                } else Result.failure<String>(result.exceptionOrNull() ?: IllegalStateException("发送失败"))
+                if (status.value.ip != ip || deviceGeneration != generation) return@withLock
+                val confirmed = readback.getOrNull()
+                _advanced.value = _advanced.value.copy(
+                    sigmaPending = _advanced.value.sigmaPending - property,
+                    sigmaValues = (_advanced.value.sigmaValues - property) +
+                        (confirmed?.let { mapOf(property to it) } ?: emptyMap()),
+                    sigmaReadErrors = (_advanced.value.sigmaReadErrors - property) +
+                        (readback.exceptionOrNull()?.let { mapOf(property to (it.message ?: "无法读取")) } ?: emptyMap()),
+                    readAtMillis = System.currentTimeMillis())
+                _message.value = when {
+                    result.isFailure -> "$label 设置失败：${result.exceptionOrNull()?.message}"
+                    confirmed == null -> "$label 命令已发送；无法回读，不标记为当前值"
+                    SigmaReadback.matches(confirmed, value) -> "$label 已回读确认；实际录像效果需设备验证"
+                    else -> "$label 命令已发送，回读值与请求不同（可能尚未应用）"
+                }
             }
         }
     }
@@ -365,3 +367,4 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
     }
 }
+

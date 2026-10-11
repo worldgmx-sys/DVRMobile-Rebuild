@@ -3,6 +3,12 @@ package com.longhorn.dvr.worldgm
 import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
@@ -26,6 +32,8 @@ class DvrRepository(context: Context) {
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(120, TimeUnit.SECONDS)
         .build()
+
+    private val settingsHttp = http.newBuilder().callTimeout(4, TimeUnit.SECONDS).build()
 
     val status: StateFlow<DvrStatus> = discovery.status
 
@@ -76,20 +84,26 @@ class DvrRepository(context: Context) {
     suspend fun getSigmaProperty(property: String): Result<String> = withContext(Dispatchers.IO) {
         val ip = status.value.ip
             ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
-        runCatching {
-            // Firmware GET() names differ from SET() names for these properties.
-            val getter = when (property) {
-                "VideoRes" -> "Videores"
-                "LoopingVideo" -> "VideoClipTime"
-                else -> property
+        try {
+            Result.success(run {
+            val getter = SigmaReadback.getters[property]
+                ?: error("该固件没有可用的参数读取接口")
+            val req = Request.Builder().url(DvrProtocol.configGet(ip, getter)).get().build()
+            val raw = settingsHttp.newCall(req).execute().use { response ->
+                check(response.isSuccessful) { "HTTP ${response.code}" }
+                response.body?.string().orEmpty()
             }
-            val raw = get(DvrProtocol.configGet(ip, getter))
-            parseConfigValue(raw, getter) ?: error("设备未返回可识别的 $property (get=$getter)")
-        }
+            SigmaReadback.parse(raw, getter) ?: error("设备未返回参数值（可能是原厂读取接口缺陷）")
+            })
+        } catch (e: CancellationException) { throw e
+        } catch (e: Exception) { Result.failure(e) }
     }
 
     suspend fun setSigmaProperty(property: String, value: String): Result<String> {
         return runCatching {
+        require(property !in setOf("VideoQuality", "MotionDetect", "MotionVideoTime", "HDR")) {
+            "此功能未通过当前 S38 固件调用链核验，暂不开放写入"
+        }
         val allowed = setOf(
             "VideoRes", "LoopingVideo", "VideoQuality", "setbitrate", "AutoRec",
             "VideoPreRecord", "Timelapse", "SlowMotion", "VideoOffTime",
@@ -140,33 +154,27 @@ class DvrRepository(context: Context) {
         withContext(Dispatchers.IO) {
             val ip = status.value.ip
                 ?: return@withContext Result.failure(IllegalStateException("尚未发现记录仪"))
-            runCatching {
-                val sigma = linkedMapOf<String, String>()
-                // SigmaStar-only: no AStar PPG calls or 8192-port probing.
-                // The OEM CGI script has broken getters for many properties.
-                // Only keep values that pass parseConfigValue.
-                DvrBackupCatalog.sigmaReadableProperties.forEach { property ->
-                    val getter = when (property) {
-                        "VideoRes" -> "Videores"
-                        "LoopingVideo" -> "VideoClipTime"
-                        else -> property
-                    }
-                    val raw = runCatching { get(DvrProtocol.configGet(ip, getter)) }.getOrNull()
-                    raw?.let { parseConfigValue(it, getter) }?.takeIf { it.isNotBlank() }?.let {
-                        sigma[property] = it
-                    }
+            try {
+                val semaphore = Semaphore(4)
+                val readings = coroutineScope {
+                    SigmaReadback.getters.keys.map { property ->
+                        async { semaphore.withPermit { property to getSigmaProperty(property) } }
+                    }.awaitAll()
                 }
-                current.copy(
-                    loading = false, error = null,
-                    sigmaValues = sigma,
-                    sigmaParkingMonitor = sigma["ParkingMonitor"]?.let {
-                        it.equals("ENABLE", true) || it.equals("ON", true) || it == "1"
+                check(status.value.ip == ip) { "设备连接已变化，请重新读取" }
+                val values = readings.mapNotNull { (key, result) -> result.getOrNull()?.let { key to it } }.toMap()
+                val errors = readings.mapNotNull { (key, result) -> result.exceptionOrNull()?.let { key to (it.message ?: "读取失败") } }.toMap()
+                Result.success(current.copy(
+                    deviceIp = ip, readAtMillis = System.currentTimeMillis(),
+                    loading = false, error = null, sigmaValues = values, sigmaReadErrors = errors,
+                    sigmaParkingMonitor = values["ParkingMonitor"]?.let {
+                        when { it.equals("ENABLE", true) -> true; it.equals("DISABLE", true) -> false; else -> null }
                     },
-                    sigmaGSensor = sigma["GSensor"],
-                    sigmaPowerOnGSensor = null,
-                    lastRawResponse = "SigmaStar S38：读取到 ${sigma.size} 项可解析的设置；其他字段未验证，未执行 AStar 探测"
-                )
-            }
+                    sigmaGSensor = values["GSensor"], sigmaPowerOnGSensor = values["PowerOnGSensor"],
+                    lastRawResponse = "设备回读 ${values.size} 项，${errors.size} 项无法读取；回读配置不等同于录像管线已采用该值"
+                ))
+            } catch (e: CancellationException) { throw e
+            } catch (e: Exception) { Result.failure(e) }
         }
 
     suspend fun collectSettingsBackup(
@@ -473,39 +481,7 @@ class DvrRepository(context: Context) {
         }
     }
 
-    private fun parseConfigValue(raw: String, property: String): String? {
-        val text = raw.trim()
-        if (text.isBlank()) return null
-        // Some OEM GET shell branches accidentally echo the nvconf command
-        // rather than executing it. Such text is NOT a live setting value.
-        if (Regex("""(?i)(?:^|[=:\s])nvconf\s+get\s+\d+\s+""").containsMatchIn(text)) return null
-        val lower = text.lowercase()
-        if ("unsupported" in lower || "not support" in lower || "unknown property" in lower) return null
-        if ("<html" in lower || "<!doctype html" in lower || "congratulations!" in lower) return null
-
-        DvrResponseParser.xmlValue(text)?.takeIf { it.isNotBlank() }?.let { return it }
-
-        val propertyRegex = Regex(
-            """(?:^|[\s<>&;])${Regex.escape(property)}\s*[:=]\s*["']?([^"'<>;&\r\n]+)""",
-            RegexOption.IGNORE_CASE
-        )
-        propertyRegex.find(text)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }?.let {
-            return it
-        }
-
-        val genericValue = Regex(
-            """\bvalue\s*[:=]\s*["']?([^"'<>;&\r\n]+)""",
-            RegexOption.IGNORE_CASE
-        ).find(text)?.groupValues?.getOrNull(1)?.trim()
-        if (!genericValue.isNullOrBlank()) return genericValue
-
-        if (text.length <= 96 && '<' !in text && '\n' !in text && '\r' !in text &&
-            !text.contains("error", true) && !text.contains("fail", true)
-        ) {
-            return text.trim('"', '\'', ' ')
-        }
-        return null
-    }
+    private fun parseConfigValue(raw: String, property: String): String? = SigmaReadback.parse(raw, property)
 
     private fun mimeFor(name: String): String = when {
         name.endsWith(".jpg", true) || name.endsWith(".jpeg", true) -> "image/jpeg"
@@ -572,3 +548,4 @@ class DvrRepository(context: Context) {
         }.sortedByDescending { it.name }
     }
 }
+

@@ -4,6 +4,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -25,8 +28,8 @@ private val catalog = listOf(
     SigmaCategory("视频录像与编码", listOf(
         f("视频分辨率", "VideoRes", "2160P25fps", "1440P30fps", "1080P30fps", "1080P27.5fpsHDR", "720P30fps", "720P27.5fpsHDR", "720P60fps", "VGA", hint="4K/HDR/高帧率档位未经过 S38 实机验证"),
         f("循环录像时长", "LoopingVideo", "1MIN", "2MIN", "3MIN", "5MIN", "10MIN", "15MIN", hint="实机已验证；原厂 OFF 实际映射为一分钟"),
-        f("视频质量", "VideoQuality", "SUPER_FINE", "FINE"),
-        f("视频码率", "setbitrate", hint="固件没有任何参数范围检查，也未确认单位；暂禁用任意写入", writable=false),
+        f("视频质量", "VideoQuality", "SUPER_FINE", "FINE", hint="cardv quality 回调仅打印 TBD，未实现实际质量调节", writable=false),
+        f("视频码率", "setbitrate", hint="FIFO 需要通道与 bps 两个参数；现有 CGI 桥接不能可靠传入，暂不开放", writable=false),
         f("自动录像", "AutoRec", "ON", "OFF", hint="固件命令存在反向编码"),
         f("预录", "VideoPreRecord", "ON", "OFF", hint="固件命令存在反向编码"),
         f("延时录像", "Timelapse", "OFF", "1SEC", "5SEC", "10SEC", "30SEC", "60SEC", hint="枚举及 FIFO 映射已从 CGI 验证；实机效果待测"),
@@ -49,7 +52,7 @@ private val catalog = listOf(
         f("防闪烁", "Flicker", "50HZ", "60HZ"),
         f("白平衡", "AWB", "Auto", "Daylight", "Cloudy", "Fluorescent1", "Fluorescent2", "Fluorescent3", "Incandescent"),
         f("快门", "Shutter"),
-        f("HDR", "HDR", "ON", "OFF"),
+        f("HDR", "HDR", "ON", "OFF", hint="存在切换链，但此固件缺少 HDR 调校文件，暂不开放", writable=false),
         f("夜间模式", "NightMode", "ON", "OFF")
     )),
     SigmaCategory("音频", listOf(
@@ -63,8 +66,8 @@ private val catalog = listOf(
     SigmaCategory("停车、碰撞与移动侦测", listOf(
         f("停车监控", "ParkingMonitor", "ENABLE", "DISABLE"),
         f("行车碰撞检测", "GSensor", "OFF", "LEVEL0", "LEVEL1", "LEVEL2", "LEVEL3", "LEVEL4"),
-        f("移动侦测", "MotionDetect", "OFF", "LOW", "MID", "HIGH"),
-        f("移动侦测录像时长", "MotionVideoTime", "5", "10", "30", "60")
+        f("移动侦测", "MotionDetect", "OFF", "LOW", "MID", "HIGH", hint="当前 cardv 没有对应 FIFO 注册项", writable=false),
+        f("移动侦测录像时长", "MotionVideoTime", "5", "10", "30", "60", hint="cardv 回调为占位实现", writable=false)
     )),
     SigmaCategory("驾驶辅助、水印与位置", listOf(
         f("车道偏离预警", "LDWS", "ON", "OFF"),
@@ -129,12 +132,17 @@ private val catalog = listOf(
 @Composable
 fun SigmaStarAdvancedControls(enabled: Boolean, vm: DvrViewModel, modifier: Modifier = Modifier) {
     val advanced by vm.advanced.collectAsStateWithLifecycle()
-    val current = advanced.sigmaValues
+    val device by vm.status.collectAsStateWithLifecycle()
+    val current = if (advanced.deviceIp == device.ip && enabled) advanced.sigmaValues else emptyMap()
+    var onlyCurrent by remember { mutableStateOf(false) }
+    LaunchedEffect(enabled, device.ip) { if (enabled && !advanced.loading) vm.refreshAdvanced() }
     var showExperimental by remember { mutableStateOf(true) }
 
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("设置仅供 SigmaStar S38 设备使用。除循环录像外，多数功能尚未实机验证。", style = MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = onlyCurrent, onClick = { onlyCurrent = !onlyCurrent },
+                label = { Text("仅显示已回读参数") })
             FilterChip(selected = showExperimental, onClick = { showExperimental = !showExperimental },
                 label = { Text(if (showExperimental) "显示全部实验性设置" else "显示已确认设置") })
         }
@@ -146,9 +154,12 @@ fun SigmaStarAdvancedControls(enabled: Boolean, vm: DvrViewModel, modifier: Modi
                         Text("${group.title}（${group.fields.size} 项）${if (expanded) " ▲" else " ▼"}")
                     }
                     if (expanded) {
-                        group.fields.filter { showExperimental || it.property == "LoopingVideo" }.forEach { field ->
+                        group.fields.filter { (showExperimental || it.property == "LoopingVideo") && (!onlyCurrent || current[it.property] != null) }.forEach { field ->
                             SigmaSettingField(
-                                field = field, selected = current[field.property], enabled = enabled, vm = vm
+                                field = field, selected = current[field.property],
+                                reading = advanced.loading || field.property in advanced.sigmaPending,
+                                readError = advanced.sigmaReadErrors[field.property],
+                                enabled = enabled && !advanced.loading && field.property !in advanced.sigmaPending, vm = vm
                             )
                             HorizontalDivider()
                         }
@@ -166,7 +177,7 @@ fun SigmaStarAdvancedControls(enabled: Boolean, vm: DvrViewModel, modifier: Modi
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SigmaSettingField(field: SigmaField, selected: String?, enabled: Boolean, vm: DvrViewModel) {
+private fun SigmaSettingField(field: SigmaField, selected: String?, reading: Boolean, readError: String?, enabled: Boolean, vm: DvrViewModel) {
     var text by remember(field.property) { mutableStateOf("") }
     var pendingValue by remember(field.property) { mutableStateOf<String?>(null) }
     val isSecret = field.property.contains("CryptoKey")
@@ -189,8 +200,22 @@ private fun SigmaSettingField(field: SigmaField, selected: String?, enabled: Boo
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(field.label, style = MaterialTheme.typography.labelLarge)
-        Text("CGI: ${field.property}" + (selected?.let { " · 设备读回：$it" } ?: " · 设备值未验证"),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val currentLabel = when {
+            reading -> "正在读取设备参数…"
+            selected != null -> "设备回读：${if (isSecret) "••••••" else selected}"
+            readError != null -> "无法读取：$readError"
+            field.property !in SigmaReadback.getters -> "固件未提供参数读取接口"
+            else -> "尚未读取设备参数"
+        }
+        Surface(
+            color = if (selected != null && !reading) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+            shape = MaterialTheme.shapes.small,
+            border = if (selected != null && !reading) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null
+        ) {
+            Text(currentLabel, Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (selected != null && !reading) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (field.hint.isNotEmpty()) Text(field.hint, style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (!field.writable) {
@@ -199,15 +224,17 @@ private fun SigmaSettingField(field: SigmaField, selected: String?, enabled: Boo
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 field.values.forEach { value ->
-                    FilterChip(selected = selected?.equals(value, ignoreCase = true) == true,
+                    val isCurrent = !reading && SigmaReadback.matches(selected, value)
+                    FilterChip(selected = isCurrent,
+                        leadingIcon = if (isCurrent) ({ Icon(Icons.Default.Check, "当前参数") }) else null,
                         onClick = { submit(value) },
-                        enabled = enabled, label = { Text(value) })
+                        enabled = enabled, label = { Text(if (isCurrent) "$value · 当前" else value) })
                 }
             }
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(value = text, onValueChange = { text = it.take(64) },
-                    label = { Text("参数值") }, singleLine = true, modifier = Modifier.weight(1f),
+                    label = { Text("待发送值（不代表设备当前值）") }, singleLine = true, modifier = Modifier.weight(1f),
                     visualTransformation = if (isSecret) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None)
                 Button(onClick = { submit(text.trim()) },
                     enabled = enabled && text.isNotBlank()) { Text("发送") }
@@ -215,3 +242,4 @@ private fun SigmaSettingField(field: SigmaField, selected: String?, enabled: Boo
         }
     }
 }
+
