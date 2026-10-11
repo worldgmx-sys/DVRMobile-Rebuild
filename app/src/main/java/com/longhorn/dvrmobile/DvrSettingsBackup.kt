@@ -109,5 +109,11 @@ object DvrBackupCatalog {
         "ParkingMonitor", "GSensor"
     )
 
-    val sigmaWritableProperties = sigmaReadableProperties.toSet()
+    // Restore only settings with relatively low operational risk.
+    val sigmaWritableProperties = setOf(
+        "LoopingVideo", "VideoQuality", "MotionDetect", "MotionVideoTime",
+        "WNR", "NightMode", "MicSensitivity", "VoiceSwitch", "Flicker",
+        "DateLogoStamp", "GpsStamp", "SpeedStamp", "Brightness", "Contrast",
+        "Saturation", "Sharpness", "GSensor"
+    )
 }
