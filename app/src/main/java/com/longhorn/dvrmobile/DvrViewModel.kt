@@ -37,6 +37,7 @@ data class DownloadTask(
 class DvrViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = DvrRepository(app)
     private val settingsMutex = Mutex()
+    private var deviceGeneration = 0L
 
     val status = repo.status
 
@@ -62,6 +63,7 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
                 .map { it.ip }
                 .distinctUntilChanged()
                 .collect { ip ->
+                    deviceGeneration++
                     _advanced.value = AdvancedDvrState(deviceIp = ip)
                     if (!ip.isNullOrBlank()) {
                         repo.initializeClient(BuildConfig.VERSION_CODE.toLong())
@@ -138,10 +140,11 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             settingsMutex.withLock {
                 val ip = status.value.ip ?: return@withLock
+                val generation = deviceGeneration
                 _advanced.value = _advanced.value.copy(loading = true, error = null,
                     sigmaValues = emptyMap(), sigmaReadErrors = emptyMap())
                 val synced = repo.syncAdvancedSettings(_advanced.value)
-                if (status.value.ip != ip) return@withLock
+                if (status.value.ip != ip || deviceGeneration != generation) return@withLock
                 _advanced.value = synced.getOrElse {
                     _advanced.value.copy(loading = false, error = it.message,
                         sigmaValues = emptyMap(), lastRawResponse = "设置同步失败：${it.message}")
@@ -162,17 +165,18 @@ class DvrViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             settingsMutex.withLock {
                 val ip = status.value.ip ?: return@withLock
+                val generation = deviceGeneration
                 _advanced.value = _advanced.value.copy(
                     sigmaPending = _advanced.value.sigmaPending + property,
                     sigmaValues = _advanced.value.sigmaValues - property,
                     sigmaReadErrors = _advanced.value.sigmaReadErrors - property)
                 val result = repo.setSigmaProperty(property, value)
-                if (status.value.ip != ip) return@withLock
+                if (status.value.ip != ip || deviceGeneration != generation) return@withLock
                 val readback = if (result.isSuccess) {
                     delay(300)
                     repo.getSigmaProperty(property)
                 } else Result.failure<String>(result.exceptionOrNull() ?: IllegalStateException("发送失败"))
-                if (status.value.ip != ip) return@withLock
+                if (status.value.ip != ip || deviceGeneration != generation) return@withLock
                 val confirmed = readback.getOrNull()
                 _advanced.value = _advanced.value.copy(
                     sigmaPending = _advanced.value.sigmaPending - property,

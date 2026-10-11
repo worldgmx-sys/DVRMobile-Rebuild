@@ -31,6 +31,10 @@ fun AdvancedSettingsSection(status: DvrStatus, vm: DvrViewModel, modifier: Modif
             if (advanced.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
             Text("设备回读：${advanced.sigmaValues.size} 项 · 高亮为回读值", style = MaterialTheme.typography.bodySmall)
             Text("回读配置不等同于实际录像管线参数；无法读取时不会选择任何默认档位。", style = MaterialTheme.typography.bodySmall)
+            advanced.readAtMillis?.let { time ->
+                Text("最近回读：" + java.text.DateFormat.getTimeInstance().format(java.util.Date(time)),
+                    style = MaterialTheme.typography.bodySmall)
+            }
             SigmaStarAdvancedControls(enabled = status.isConnected, vm = vm)
             advanced.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             advanced.lastRawResponse?.let {
